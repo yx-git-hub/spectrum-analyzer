@@ -1,0 +1,2704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spectrum Analyzer</title>
+  <!--
+    Spectrum Analyzer
+    Developer : yanjiye
+    Student ID: 2532687
+  -->
+  <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      font-size: 12px;
+      background: #f4f4f6;
+      color: #222;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      overflow-x: hidden;    /* no vertical clip — ctrl-panel expands freely */
+    }
+
+    /* ── Header ─────────────────────────────────────────── */
+    #header {
+      background: #1a1e2e;
+      color: #e8eaf6;
+      padding: 7px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+      border-bottom: 2px solid #3949ab;
+    }
+    #header h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.8px; }
+    #header span { font-size: 10px; color: #7986cb; }
+
+    /* ── Load Area ──────────────────────────────────────── */
+    #load-area {
+      background: white;
+      border-bottom: 1px solid #ddd;
+      padding: 10px 16px;
+      display: flex;
+      gap: 32px;
+      align-items: flex-start;
+      flex-shrink: 0;
+    }
+    .load-section { display: flex; flex-direction: column; gap: 5px; }
+    .load-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      color: #3949ab;
+      border-bottom: 1px solid #e8eaf6;
+      padding-bottom: 3px;
+      margin-bottom: 2px;
+    }
+    .load-row { display: flex; gap: 5px; align-items: center; }
+    input[type="text"] {
+      padding: 4px 8px; border: 1px solid #ccc; border-radius: 3px;
+      font-size: 11px; width: 300px; color: #444; background: #fafafa;
+    }
+    button {
+      padding: 4px 11px; background: #3949ab; color: white;
+      border: none; border-radius: 3px; cursor: pointer; font-size: 11px;
+      transition: background 0.15s;
+    }
+    button:hover { background: #283593; }
+    button:disabled { background: #bbb; cursor: not-allowed; }
+    button.secondary {
+      background: #546e7a;
+    }
+    button.secondary:hover { background: #37474f; }
+    .load-info { font-size: 10px; color: #777; font-style: italic; min-height: 14px; }
+
+    /* thickness control */
+    #thickness-control {
+      display: none; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap;
+    }
+    #thickness-control label { font-size: 11px; color: #444; }
+    #thickness-slider { width: 180px; cursor: pointer; accent-color: #3949ab; }
+    #thickness-num {
+      width: 66px; padding: 3px 6px; border: 1px solid #ccc;
+      border-radius: 3px; font-size: 11px;
+    }
+    #thickness-hint { font-size: 10px; color: #777; }
+
+    /* excel drop zone */
+    #excel-drop {
+      border: 2px dashed #c5cae9; border-radius: 5px;
+      padding: 12px 20px; text-align: center; cursor: pointer;
+      color: #9fa8da; font-size: 11px; transition: all 0.2s;
+      min-width: 200px; min-height: 56px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    #excel-drop:hover, #excel-drop.dragover {
+      border-color: #3949ab; color: #3949ab; background: #e8eaf6;
+    }
+    #excel-drop.loaded { border-color: #43a047; color: #2e7d32; background: #f1f8e9; }
+    #excel-controls { display: none; margin-top: 5px; }
+    .ectl-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+    .ectl-row label { font-size: 11px; color: #444; width: 95px; }
+    select {
+      padding: 3px 6px; border: 1px solid #ccc; border-radius: 3px;
+      font-size: 11px; background: white;
+    }
+    .ectl-num { width: 58px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 3px; font-size: 11px; }
+    .ectl-hint { font-size: 10px; color: #777; }
+
+    /* ── Load Area extra columns ───────────────────────── */
+    .load-section-divider {
+      width: 1px; background: #e0e4e8; align-self: stretch; flex-shrink: 0;
+    }
+    .load-section-fit {
+      display: flex; flex-direction: column; gap: 5px;
+      min-width: 185px; max-width: 220px;
+    }
+    .load-section-fs {
+      display: flex; flex-direction: column; gap: 5px;
+      min-width: 165px; max-width: 200px;
+    }
+    .fit-row { display: flex; align-items: center; gap: 5px; font-size: 11px; }
+    .fit-row label { width: 120px; color: #444; white-space: nowrap; }
+    .fit-row input[type="number"] {
+      width: 58px; padding: 2px 5px; border: 1px solid #ccc;
+      border-radius: 3px; font-size: 11px;
+    }
+    .fit-mode-group { font-size: 11px; color: #444; line-height: 1.8; }
+    .fit-mode-group .fit-mode-title {
+      font-weight: 700; color: #3949ab; font-size: 10px;
+      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;
+    }
+    .fit-mode-group label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+    .fit-action-btn {
+      padding: 5px 10px; border-radius: 4px; cursor: pointer;
+      font-size: 11px; font-weight: 600; text-align: center;
+      width: 100%; border: 1px solid transparent; margin-top: 3px;
+    }
+
+    /* ── Main area ──────────────────────────────────────── */
+    #main {
+      display: flex;
+      flex-direction: column;
+      flex: none;
+    }
+    #charts-row {
+      display: flex;
+      height: 55vh;        /* explicit viewport-relative height, ~80 % of what flex:1 gave */
+      min-height: 200px;
+      flex-shrink: 0;
+      gap: 6px;
+      padding: 6px;
+      background: #f4f4f6;
+    }
+    #gen-chart-wrap, #exp-chart-wrap {
+      flex: 1;
+      min-width: 0;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    #gen-chart, #exp-chart { width: 100%; height: 100%; }
+
+    #valley-wrap {
+      width: 210px;
+      background: white;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .vt-header {
+      background: #1a1e2e;
+      color: #e8eaf6;
+      padding: 5px 8px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      flex-shrink: 0;
+    }
+    #valley-scroll { overflow-y: auto; flex: 1; }
+    #valley-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    #valley-table th {
+      background: #e8eaf6; color: #283593;
+      padding: 4px 6px; text-align: center;
+      border-bottom: 1px solid #c5cae9;
+      position: sticky; top: 0;
+      font-size: 10px; text-transform: uppercase;
+    }
+    #valley-table td { padding: 3px 6px; text-align: center; border-bottom: 1px solid #f5f5f5; }
+    #valley-table tr:hover td { background: #f5f5f5; }
+    .dg { color: #2e7d32; font-weight: 600; }
+    .dw { color: #e65100; font-weight: 600; }
+    .db { color: #c62828; font-weight: 600; }
+    .dash { color: #bbb; }
+
+    /* ── Valley/Peak summary stats ──────────────────────── */
+    #vt-stats {
+      display: none;
+      padding: 5px 8px 4px;
+      background: #f8f9fa;
+      border-bottom: 1px solid #e0e4e8;
+      flex-shrink: 0;
+    }
+    .vt-stat-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 1px 0; font-size: 10px;
+    }
+    .vt-stat-label { color: #666; }
+    .vt-stat-value { font-weight: 700; color: #333; font-variant-numeric: tabular-nums; }
+
+    /* ── Control Panel ──────────────────────────────────── */
+    /* Toggle bar — always visible, always below charts */
+    #ctrl-panel {
+      flex-shrink: 0;
+      background: white;
+      border-top: 2px solid #3949ab;
+    }
+    #ctrl-bar {
+      height: 36px;
+      padding: 0 18px;
+      display: flex;
+      align-items: center;
+    }
+    /* Settings content: hidden when collapsed, flex-row when open */
+    #ctrl-content {
+      display: none;
+      padding: 12px 20px;
+      gap: 28px;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      overflow-y: auto;
+      max-height: 310px;
+    }
+    #ctrl-panel.open #ctrl-content { display: flex; }
+
+    .ctrl-toggle {
+      font-size: 15px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.6px; color: #3949ab; cursor: pointer;
+      user-select: none; display: flex; align-items: center; gap: 6px;
+    }
+    .ctrl-group { display: flex; flex-direction: column; gap: 6px; min-width: 200px; }
+    .ctrl-group h4 {
+      font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;
+      color: #3949ab; border-bottom: 2px solid #e8eaf6;
+      padding-bottom: 4px; font-weight: 700;
+    }
+    .ctr { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .ctr label { width: 130px; color: #444; }
+    .ctr input[type="number"] {
+      width: 72px; padding: 3px 7px; border: 1px solid #ccc;
+      border-radius: 3px; font-size: 14px;
+    }
+
+    /* ── Status bar ─────────────────────────────────────── */
+    #statusbar {
+      background: #eceff1; border-top: 1px solid #cfd8dc;
+      padding: 2px 14px; font-size: 10px; color: #607d8b;
+      flex-shrink: 0; display: flex; justify-content: space-between;
+    }
+
+    /* ── Gap-mask interval rows ──────────────────────────── */
+    .gap-row {
+      display: flex; align-items: center; gap: 6px;
+      margin-bottom: 4px; background: #fff8e1;
+      padding: 5px 8px; border-radius: 4px; border: 1px solid #ffe082;
+      font-size: 14px;
+    }
+    .gap-row input[type="number"] {
+      width: 68px; padding: 3px 5px; border: 1px solid #ccc;
+      border-radius: 3px; font-size: 14px;
+    }
+
+    /* ── Smoothing segment rows ─────────────────────────── */
+    .sg-seg {
+      display: flex; align-items: center; gap: 6px;
+      margin-bottom: 4px; background: #f8f9fa;
+      padding: 5px 8px; border-radius: 4px; border: 1px solid #e0e4e8;
+      flex-wrap: wrap; font-size: 14px;
+    }
+    .sg-seg input[type="number"] {
+      width: 56px; padding: 3px 5px; border: 1px solid #ccc;
+      border-radius: 3px; font-size: 14px;
+    }
+    .sg-lbl { font-size: 13px; color: #777; white-space: nowrap; }
+    .del-btn {
+      background: #ef5350; color: white; border: none; border-radius: 3px;
+      width: 22px; height: 22px; cursor: pointer; font-size: 13px; line-height: 1;
+      flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    }
+    .del-btn:hover { background: #c62828; }
+    .sg-apply { font-size: 13px; padding: 5px 14px; margin-top: 4px; }
+    .sg-add   { font-size: 13px; padding: 5px 14px; margin-top: 4px; }
+
+    /* ── Overlay spectrum modal ─────────────────────────── */
+    #overlay-modal {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55); z-index: 500;
+      justify-content: center; align-items: center;
+    }
+    #overlay-modal.show { display: flex; }
+    #overlay-box {
+      background: white; width: 88vw; height: 82vh;
+      border-radius: 8px; display: flex; flex-direction: column;
+      overflow: hidden; box-shadow: 0 10px 50px rgba(0,0,0,0.4);
+      border-top: 3px solid #3949ab;
+    }
+    #overlay-header {
+      background: #1a1e2e; color: #e8eaf6;
+      padding: 8px 16px; display: flex;
+      justify-content: space-between; align-items: center; flex-shrink: 0;
+    }
+    #overlay-header span { font-size: 14px; font-weight: 600; }
+    #overlay-close {
+      background: none; border: none; color: #e8eaf6;
+      font-size: 20px; cursor: pointer; line-height: 1; padding: 0 4px;
+    }
+    #overlay-close:hover { color: #ef5350; }
+    #overlay-chart { flex: 1; }
+
+    /* ── Quick-action buttons in settings ───────────────── */
+    .action-btn {
+      padding: 8px 16px; border-radius: 5px; cursor: pointer;
+      font-size: 13px; font-weight: 600; text-align: left;
+      width: 100%; transition: background 0.15s; border: 1px solid transparent;
+    }
+    .action-btn.state-off { background: #eceff1; color: #546e7a; border-color: #cfd8dc; }
+    .action-btn.state-off:hover { background: #cfd8dc; }
+    .action-btn.state-on  { background: #e8f5e9; color: #2e7d32; border-color: #a5d6a7; }
+    .action-btn.state-on:hover  { background: #c8e6c9; }
+    .action-btn.state-view { background: #e8eaf6; color: #3949ab; border-color: #c5cae9; }
+    .action-btn.state-view:hover { background: #c5cae9; }
+
+    /* ── Auto-Fit modal ─────────────────────────────────── */
+    #autofit-modal {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55); z-index: 500;
+      justify-content: center; align-items: center;
+    }
+    #autofit-modal.show { display: flex; }
+    #autofit-box {
+      background: white; width: 82vw; height: 76vh;
+      border-radius: 8px; display: flex; flex-direction: column;
+      overflow: hidden; box-shadow: 0 10px 50px rgba(0,0,0,0.4);
+      border-top: 3px solid #43a047;
+    }
+    #autofit-header {
+      background: #1a1e2e; color: #e8eaf6;
+      padding: 8px 16px; display: flex;
+      justify-content: space-between; align-items: center; flex-shrink: 0;
+    }
+    #autofit-header span { font-size: 14px; font-weight: 600; }
+    #autofit-close {
+      background: none; border: none; color: #e8eaf6;
+      font-size: 20px; cursor: pointer; line-height: 1; padding: 0 4px;
+    }
+    #autofit-close:hover { color: #ef5350; }
+    #autofit-result {
+      padding: 6px 16px; background: #f1f8e9; flex-shrink: 0;
+      font-size: 12px; color: #2e7d32; border-bottom: 1px solid #c8e6c9;
+      font-weight: 600;
+    }
+    #autofit-body { flex: 1; display: flex; min-height: 0; }
+    #autofit-chart { flex: 1; min-width: 0; }
+    #autofit-pairs {
+      width: 250px; flex-shrink: 0;
+      border-left: 1px solid #e0e4e8;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    #autofit-pairs-header {
+      background: #1a1e2e; color: #e8eaf6;
+      padding: 5px 8px; font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.6px; flex-shrink: 0;
+    }
+    #autofit-pairs-scroll { overflow-y: auto; flex: 1; }
+    #autofit-pairs-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    #autofit-pairs-table th {
+      background: #e8eaf6; color: #283593;
+      padding: 4px 5px; text-align: center;
+      border-bottom: 1px solid #c5cae9;
+      position: sticky; top: 0; font-size: 10px; text-transform: uppercase;
+    }
+    #autofit-pairs-table td { padding: 3px 5px; text-align: center; border-bottom: 1px solid #f5f5f5; }
+    #autofit-pairs-table tr:hover td { background: #f5f5f5; }
+
+    /* ── Loading overlay ────────────────────────────────── */
+    #loading-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(10,10,30,0.45); z-index: 999;
+      justify-content: center; align-items: center;
+    }
+    #loading-overlay.show { display: flex; }
+    .loading-box {
+      background: white; padding: 24px 36px; border-radius: 8px;
+      text-align: center; box-shadow: 0 6px 28px rgba(0,0,0,0.35);
+      border-top: 3px solid #3949ab;
+    }
+    .spinner {
+      width: 30px; height: 30px;
+      border: 3px solid #e8eaf6; border-top-color: #3949ab;
+      border-radius: 50%; animation: spin 0.75s linear infinite;
+      margin: 0 auto 10px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading-msg { font-size: 12px; color: #555; }
+  </style>
+</head>
+<body>
+
+<!-- Loading Overlay -->
+<div id="loading-overlay">
+  <div class="loading-box">
+    <div class="spinner"></div>
+    <div id="loading-msg">Loading...</div>
+  </div>
+</div>
+
+<!-- Header -->
+<div id="header">
+  <h1>&#9632; SPECTRUM ANALYZER</h1>
+  <span>Thin-Film Reflectance Analysis &mdash; MoS₂ / Fabry-Pérot</span>
+</div>
+
+<!-- Load Area -->
+<div id="load-area">
+
+  <!-- CSV -->
+  <div class="load-section">
+    <div class="load-label">Generated Spectra (CSV)</div>
+    <div class="load-row">
+      <input type="text" id="csv-path" placeholder="e.g. data/gen_data_single_MoS2_B85_E2000_step0.5.csv" readonly>
+      <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="onCSVFileSelected(event)">
+      <button onclick="document.getElementById('csv-file-input').click()">Browse</button>
+      <button id="csv-load-btn" onclick="loadCSV()" disabled>Load</button>
+    </div>
+    <div id="csv-info" class="load-info">No file selected</div>
+    <div id="thickness-control">
+      <label>Thickness:</label>
+      <input type="range" id="thickness-slider" min="0" max="0" value="0"
+             oninput="onThicknessSlide(this.value)">
+      <input type="number" id="thickness-num" step="0.5"
+             oninput="onThicknessNumInput(this.value)">
+      <span id="thickness-hint" class=""></span>
+    </div>
+  </div>
+
+  <!-- Excel / CSV Experiment -->
+  <div class="load-section">
+    <div class="load-label">Experimental Spectra (Excel / CSV)</div>
+    <div id="excel-drop"
+         onclick="document.getElementById('excel-file-input').click()"
+         ondragover="onDragOver(event)" ondragleave="onDragLeave(event)"
+         ondrop="onExcelDrop(event)">
+      <div style="font-size:18px;line-height:1;">&#8659;</div>
+      <div>Drop file here or click to browse</div>
+      <div style="font-size:10px;margin-top:3px;opacity:0.7;">.xlsx  .xls  .csv</div>
+    </div>
+    <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv"
+           style="display:none" onchange="onExcelFileSelected(event)">
+    <div id="excel-info" class="load-info">No file loaded</div>
+    <div id="excel-controls">
+      <div class="ectl-row" id="excel-sheet-row" style="display:none">
+        <label>Sheet:</label>
+        <select id="excel-sheet-select" onchange="onExcelSheetChange()"></select>
+      </div>
+      <div class="ectl-row">
+        <label>Format:</label>
+        <select id="excel-format" onchange="onExcelFormatChange()">
+          <option value="B">Format B — rows=spectra, last row=wavelengths</option>
+          <option value="A">Format A — col 0=wavelength, other cols=spectra</option>
+        </select>
+      </div>
+      <div class="ectl-row" id="excel-idx-row">
+        <label>Spectrum index:</label>
+        <button id="excel-idx-prev" onclick="stepExcelIdx(-1)"
+                style="padding:2px 6px;min-width:22px;height:22px;font-size:11px;line-height:1;" disabled>◀</button>
+        <input type="number" class="ectl-num" id="excel-idx" min="0" value="0"
+               oninput="onExcelIdxChange(this.value)">
+        <button id="excel-idx-next" onclick="stepExcelIdx(1)"
+                style="padding:2px 6px;min-width:22px;height:22px;font-size:11px;line-height:1;" disabled>▶</button>
+        <span id="excel-idx-hint" class="ectl-hint"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Divider -->
+  <div class="load-section-divider"></div>
+
+  <!-- Auto-Fit Thickness column -->
+  <div class="load-section-fit">
+    <div class="load-label">&#9650; Auto-Fit Thickness</div>
+    <div class="fit-mode-group">
+      <div class="fit-mode-title">Match mode</div>
+      <label><input type="radio" name="autofit-mode" value="valleys" checked> Valleys only</label>
+      <label><input type="radio" name="autofit-mode" value="peaks"> Peaks only</label>
+      <label><input type="radio" name="autofit-mode" value="both"> Valleys + Peaks</label>
+    </div>
+    <div class="fit-row" style="margin-top:3px;">
+      <label>Unmatch penalty:</label>
+      <input type="number" id="autofit-penalty" value="100" min="0" step="10">
+      <span style="font-size:10px;color:#777;">nm²</span>
+    </div>
+    <div class="fit-row">
+      <label>Max match diff (nm):</label>
+      <input type="number" id="autofit-max-diff" value="30" min="1" step="1"
+             title="Pairs exceeding this threshold are not counted as valid matches">
+    </div>
+    <button class="fit-action-btn"
+            style="background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7;"
+            onclick="autoFitThickness()">
+      &#9650; Auto-Fit Thickness
+    </button>
+  </div>
+
+  <!-- Divider -->
+  <div class="load-section-divider"></div>
+
+  <!-- Fine Search column -->
+  <div class="load-section-fs">
+    <div class="load-label">&#9889; Fine Search</div>
+    <div class="fit-row">
+      <label>Start (nm):</label>
+      <input type="number" id="fs-start" step="0.5" min="0" oninput="updateFsCountHint()">
+    </div>
+    <div class="fit-row">
+      <label>End (nm):</label>
+      <input type="number" id="fs-end" step="0.5" min="0" oninput="updateFsCountHint()">
+    </div>
+    <div class="fit-row">
+      <label>Step (nm):</label>
+      <input type="number" id="fs-step" value="0.1" step="0.01" min="0.01" oninput="updateFsCountHint()">
+    </div>
+    <div id="fs-count-hint" style="font-size:10px;color:#777;margin-top:1px;">—</div>
+    <button id="fs-btn" class="fit-action-btn"
+            style="background:#fff3e0;color:#e65100;border-color:#ffcc80;"
+            onclick="runFineSearch()">
+      &#128269; Fine Search
+    </button>
+  </div>
+
+</div>
+
+<!-- Main: Charts + Valley Table -->
+<div id="main">
+  <div id="charts-row">
+    <div id="gen-chart-wrap">
+      <div id="gen-chart"></div>
+    </div>
+    <div id="exp-chart-wrap">
+      <div id="exp-chart"></div>
+    </div>
+    <div id="valley-wrap">
+      <div class="vt-header">Valley / Peak Comparison</div>
+      <div id="vt-stats">
+        <div class="vt-stat-row">
+          <span class="vt-stat-label">Overall &#916;</span>
+          <span class="vt-stat-value" id="vt-stat-overall">—</span>
+        </div>
+        <div class="vt-stat-row">
+          <span class="vt-stat-label">Valleys &#916;</span>
+          <span class="vt-stat-value" id="vt-stat-valleys">—</span>
+        </div>
+        <div class="vt-stat-row">
+          <span class="vt-stat-label">Peaks &#916;</span>
+          <span class="vt-stat-value" id="vt-stat-peaks">—</span>
+        </div>
+      </div>
+      <div id="valley-scroll">
+        <table id="valley-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Gen (nm)</th><th>Exp (nm)</th><th>&#916; (nm)</th>
+            </tr>
+          </thead>
+          <tbody id="valley-tbody">
+            <tr>
+              <td colspan="4" style="color:#bbb;padding:16px;text-align:center;font-size:11px;">
+                No valleys detected
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Control Panel: toggle bar + collapsible content, both in flex flow -->
+<div id="ctrl-panel">
+  <div id="ctrl-bar">
+    <div class="ctrl-toggle" onclick="toggleCtrl()">
+      <span id="ctrl-arrow">&#9654;</span>
+      <span>Settings &amp; Parameters</span>
+    </div>
+  </div>
+  <div id="ctrl-content">
+
+    <!-- Quick Actions -->
+    <div class="ctrl-group" style="min-width:160px">
+      <h4>Quick Actions</h4>
+      <button id="auto-run-btn" class="action-btn state-off" onclick="toggleAutoRun()">
+        &#9654; Auto-Run: OFF
+      </button>
+      <button class="action-btn state-view" onclick="openOverlay()">
+        &#9974; Overlay View
+      </button>
+    </div>
+
+    <div class="ctrl-group" id="ctrl-wl-range">
+      <h4>Wavelength Range</h4>
+      <div class="ctr">
+        <label>Min (nm):</label>
+        <input type="number" id="wl-min" step="1" placeholder="auto" oninput="updatePlots()">
+      </div>
+      <div class="ctr">
+        <label>Max (nm):</label>
+        <input type="number" id="wl-max" step="1" placeholder="auto" oninput="updatePlots()">
+      </div>
+      <div class="ctr">
+        <label>Custom step:</label>
+        <input type="checkbox" id="wl-step-enable" onchange="updatePlots()">
+      </div>
+      <div class="ctr">
+        <label>Step (nm):</label>
+        <input type="number" id="wl-step-size" value="1" step="0.1" min="0.01" oninput="updatePlots()">
+      </div>
+    </div>
+
+    <!-- SG Smoothing — Generated -->
+    <div class="ctrl-group" id="sg-gen-group" style="min-width:330px">
+      <h4>Gen Spectrum — Savitzky-Golay Smoothing</h4>
+      <div id="sg-gen-segments"></div>
+      <div style="display:flex;gap:5px;margin-top:4px;">
+        <button class="secondary sg-add" onclick="addSgSegment('gen')">+ Segment</button>
+        <button class="sg-apply" onclick="applySmoothing('gen')">Apply</button>
+      </div>
+    </div>
+
+    <!-- SG Smoothing — Experimental -->
+    <div class="ctrl-group" id="sg-exp-group" style="min-width:330px">
+      <h4>Exp Spectrum — Savitzky-Golay Smoothing</h4>
+      <div id="sg-exp-segments"></div>
+      <div style="display:flex;gap:5px;margin-top:4px;">
+        <button class="secondary sg-add" onclick="addSgSegment('exp')">+ Segment</button>
+        <button class="sg-apply" onclick="applySmoothing('exp')">Apply</button>
+      </div>
+    </div>
+
+    <!-- Gap Mask -->
+    <div class="ctrl-group" style="min-width:270px">
+      <h4>Exclusion Intervals (Gap Mask)</h4>
+      <div id="gap-mask-list"></div>
+      <button class="secondary sg-add" onclick="addGapInterval()" style="margin-top:4px">+ Interval</button>
+    </div>
+
+    <!-- Valley/Peak Detection — Gen -->
+    <div class="ctrl-group" style="min-width:210px">
+      <h4>Gen — Valley / Peak Detection</h4>
+      <div class="ctr"><label>Prominence:</label>
+        <input type="number" id="gen-prom" value="0.2" step="0.05" min="0" oninput="syncDetectionParam('gen','prominence',this.value)"></div>
+      <div class="ctr"><label>Distance (nm):</label>
+        <input type="number" id="gen-dist" value="20" step="1" min="1" oninput="syncDetectionParam('gen','distanceNm',this.value)"></div>
+      <div class="ctr"><label>Min height:</label>
+        <input type="number" id="gen-height" value="0" step="0.01" oninput="syncDetectionParam('gen','height',this.value)"></div>
+      <div class="ctr"><label>Valleys:</label>
+        <input type="checkbox" id="gen-valleys" checked onchange="syncDetectionCheck('gen','detectValleys',this.checked)"></div>
+      <div class="ctr"><label>Peaks:</label>
+        <input type="checkbox" id="gen-peaks" onchange="syncDetectionCheck('gen','detectPeaks',this.checked)"></div>
+      <button onclick="runDetection('gen')" style="margin-top:4px">Detect</button>
+    </div>
+
+    <!-- Valley/Peak Detection — Exp -->
+    <div class="ctrl-group" style="min-width:210px">
+      <h4>Exp — Valley / Peak Detection</h4>
+      <div class="ctr"><label>Prominence:</label>
+        <input type="number" id="exp-prom" value="0.2" step="0.05" min="0" oninput="syncDetectionParam('exp','prominence',this.value)"></div>
+      <div class="ctr"><label>Distance (nm):</label>
+        <input type="number" id="exp-dist" value="20" step="1" min="1" oninput="syncDetectionParam('exp','distanceNm',this.value)"></div>
+      <div class="ctr"><label>Min height:</label>
+        <input type="number" id="exp-height" value="0" step="0.01" oninput="syncDetectionParam('exp','height',this.value)"></div>
+      <div class="ctr"><label>Valleys:</label>
+        <input type="checkbox" id="exp-valleys" checked onchange="syncDetectionCheck('exp','detectValleys',this.checked)"></div>
+      <div class="ctr"><label>Peaks:</label>
+        <input type="checkbox" id="exp-peaks" onchange="syncDetectionCheck('exp','detectPeaks',this.checked)"></div>
+      <button onclick="runDetection('exp')" style="margin-top:4px">Detect</button>
+    </div>
+
+    <!-- Comparison colour thresholds -->
+    <div class="ctrl-group" style="min-width:195px">
+      <h4>Comparison Thresholds</h4>
+      <div class="ctr">
+        <label>&#916; green &#8804; (nm):</label>
+        <input type="number" id="vt-thr-green" value="10" step="1" min="0" oninput="updateValleyTable()">
+      </div>
+      <div class="ctr">
+        <label>&#916; orange &#8804; (nm):</label>
+        <input type="number" id="vt-thr-orange" value="20" step="1" min="0" oninput="updateValleyTable()">
+      </div>
+    </div>
+
+    <!-- CSV format config -->
+    <div class="ctrl-group" style="min-width:225px">
+      <h4>CSV Format</h4>
+      <div class="ctr">
+        <label>Wavelength row:</label>
+        <select id="csv-wl-row" style="font-size:11px;">
+          <option value="last">Last row</option>
+          <option value="first">First row</option>
+        </select>
+      </div>
+      <div class="ctr">
+        <label>Last col = thickness:</label>
+        <input type="checkbox" id="csv-has-thickness" checked>
+      </div>
+      <div class="ctr">
+        <label>Exclude last WL val:</label>
+        <input type="checkbox" id="csv-exclude-last-wl" checked>
+      </div>
+      <div style="font-size:10px;color:#999;margin-top:4px;font-style:italic;">Takes effect on next Load</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Status Bar -->
+<div id="statusbar">
+  <span id="status-text">Ready — load CSV and/or experiment file to begin</span>
+  <span id="status-right"></span>
+</div>
+
+<!-- Auto-Fit modal: RMSE vs thickness + matched pairs table -->
+<div id="autofit-modal" onclick="onAutofitBackdrop(event)">
+  <div id="autofit-box">
+    <div id="autofit-header">
+      <span>&#9650; Auto-Fit Result &mdash; Cost &amp; RMSE vs Thickness</span>
+      <button id="autofit-toggle-chart" onclick="toggleAutofitChart()"
+              style="margin-right:8px;padding:3px 10px;font-size:11px;background:#3949ab;color:white;border:none;border-radius:3px;cursor:pointer;">
+        Show Cost
+      </button>
+      <button id="autofit-close" onclick="closeAutofitModal()">&#10005;</button>
+    </div>
+    <div id="autofit-result"></div>
+    <div id="autofit-body">
+      <div id="autofit-chart"></div>
+      <div id="autofit-pairs">
+        <div id="autofit-pairs-header">Matched Valleys</div>
+        <div id="autofit-pairs-scroll">
+          <table id="autofit-pairs-table">
+            <thead>
+              <tr><th>#</th><th>Gen (nm)</th><th>Exp (nm)</th><th>&#916; (nm)</th></tr>
+            </thead>
+            <tbody id="autofit-pairs-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Overlay modal: both spectra on one chart -->
+<div id="overlay-modal" onclick="onOverlayBackdrop(event)">
+  <div id="overlay-box">
+    <div id="overlay-header">
+      <span>&#9974; Spectrum Overlay</span>
+      <button id="overlay-markers-btn" onclick="toggleOverlayMarkers()"
+              style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);
+                     color:#e8eaf6;border-radius:3px;padding:3px 12px;font-size:11px;cursor:pointer;
+                     margin-left:auto;margin-right:12px;transition:background 0.15s;">
+        Hide Markers
+      </button>
+      <button id="overlay-close" onclick="closeOverlay()">&#10005;</button>
+    </div>
+    <div id="overlay-chart"></div>
+  </div>
+</div>
+
+<script>
+/**
+ * Spectrum Analyzer
+ * Developer : yanjiye
+ * Student ID: 2532687
+ */
+
+// ═══════════════════════════════════════════════════════════════
+//  AppState — single source of truth
+// ═══════════════════════════════════════════════════════════════
+const AppState = {
+  csv: {
+    file: null,
+    wavelengths: [],    // number[]
+    spectra: [],        // number[][]  (index = row in CSV, excluding last row)
+    thicknesses: [],    // number[]    (last col of each spectrum row)
+    selectedIdx: 0,
+  },
+  excel: {
+    file: null,
+    _rawRows: null,
+    format: 'B',
+    wavelengths: [],
+    spectra: [],
+    thicknesses: [],    // may contain nulls
+    selectedIdx: 0,
+  },
+  valleys: {
+    gen: [],   // number[] — detected valley wavelengths in gen spectrum
+    exp: [],   // number[] — detected valley wavelengths in exp spectrum
+  },
+  display: {
+    wlMin: null,
+    wlMax: null,
+  },
+  smoothing: {
+    gen: { segments: [], cached: null, cachedIdx: -1 },
+    exp: { segments: [], cached: null, cachedIdx: -1 },
+  },
+  peaks: { gen: [], exp: [] },
+  gapMask: {
+    intervals: [
+      { wlMin: 810, wlMax: 835 },
+      { wlMin: 965, wlMax: 985 },
+    ],
+  },
+  detection: {
+    gen: { prominence: 0.2, distanceNm: 20, height: 0, detectValleys: true,  detectPeaks: false },
+    exp: { prominence: 0.2, distanceNm: 20, height: 0, detectValleys: true,  detectPeaks: false },
+  },
+  autoRun: false,
+};
+
+// Last coarse Auto-Fit result — used as background overlay when Fine Search runs
+let _coarseResult      = null;
+let _autofitChartData  = null;   // stored by _showAutofitModal for chart toggle
+let _autofitShowRmse   = true;   // true = RMSE view, false = Cost view
+
+// ═══════════════════════════════════════════════════════════════
+//  CSV — Generated Spectra
+// ═══════════════════════════════════════════════════════════════
+
+function onCSVFileSelected(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  AppState.csv.file = file;
+  document.getElementById('csv-path').value = file.name;
+  document.getElementById('csv-load-btn').disabled = false;
+  document.getElementById('csv-info').textContent =
+    `${file.name}  (${(file.size / 1024 / 1024).toFixed(1)} MB) — click Load`;
+}
+
+function loadCSV() {
+  const file = AppState.csv.file;
+  if (!file) return;
+  showLoading('Reading CSV file...');
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      setTimeout(() => parseCSV(e.target.result), 10); // yield to show overlay
+    } catch (err) {
+      hideLoading();
+      setStatus('Error: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function parseCSV(text) {
+  setLoadingMsg('Parsing rows...');
+
+  // Split into lines, ignore trailing empty
+  const lines = text.split('\n');
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+
+  const totalRows = lines.length;
+  if (totalRows < 2) throw new Error('CSV must have at least 2 rows');
+
+  // Read format config from Settings
+  const wlRowIsLast   = document.getElementById('csv-wl-row').value !== 'first';
+  const hasThickness  = document.getElementById('csv-has-thickness').checked;
+  const excludeLastWl = document.getElementById('csv-exclude-last-wl').checked;
+
+  const wlLineIdx = wlRowIsLast ? totalRows - 1 : 0;
+  const wlRaw     = lines[wlLineIdx].split(',');
+  const wlSlice   = excludeLastWl ? wlRaw.slice(0, -1) : wlRaw;
+  const wavelengths = wlSlice.map(Number).filter(v => !isNaN(v) && v > 0);
+
+  const spectra = [];
+  const thicknesses = [];
+
+  for (let i = 0; i < totalRows; i++) {
+    if (i === wlLineIdx) continue;
+    const parts = lines[i].split(',');
+    if (hasThickness) {
+      const thickness = parseFloat(parts[parts.length - 1]);
+      if (isNaN(thickness)) continue;
+      spectra.push(parts.slice(0, -1).map(Number));
+      thicknesses.push(thickness);
+    } else {
+      spectra.push(parts.map(Number));
+      thicknesses.push(spectra.length - 1);  // use row index when no thickness col
+    }
+  }
+
+  AppState.csv.wavelengths = wavelengths;
+  AppState.csv.spectra = spectra;
+  AppState.csv.thicknesses = thicknesses;
+  AppState.csv.selectedIdx = 0;
+
+  // Thickness slider
+  const slider = document.getElementById('thickness-slider');
+  const numInput = document.getElementById('thickness-num');
+  slider.min = 0;
+  slider.max = thicknesses.length - 1;
+  slider.value = 0;
+  const tMin = thicknesses[0];
+  const tMax = thicknesses[thicknesses.length - 1];
+  const step = thicknesses.length > 1 ? +(thicknesses[1] - thicknesses[0]).toFixed(3) : 0.5;
+  numInput.min = tMin;
+  numInput.max = tMax;
+  numInput.step = step;
+  numInput.value = tMin;
+  document.getElementById('thickness-hint').textContent =
+    `range ${tMin}–${tMax} nm, step ${step} nm`;
+  document.getElementById('thickness-control').style.display = 'flex';
+
+  document.getElementById('csv-info').textContent =
+    `Loaded: ${spectra.length} spectra × ${wavelengths.length} pts  |  t = ${tMin}–${tMax} nm`;
+
+  hideLoading();
+  setStatus(`CSV loaded — ${spectra.length} spectra, ${wavelengths.length} wavelength points`);
+  _coarseResult = null;  // invalidate coarse result when new CSV loads
+  // Set fine search defaults from the mid-point of the loaded thickness range
+  const _fsMid = thicknesses[Math.floor(thicknesses.length / 2)];
+  const _fsS = document.getElementById('fs-start');
+  const _fsE = document.getElementById('fs-end');
+  if (_fsS) _fsS.value = Math.max(thicknesses[0], +(_fsMid - 50).toFixed(1));
+  if (_fsE) _fsE.value = Math.min(thicknesses[thicknesses.length - 1], +(_fsMid + 50).toFixed(1));
+  updateFsCountHint();
+  updatePlots();
+}
+
+function onThicknessSlide(val) {
+  const idx = parseInt(val);
+  AppState.csv.selectedIdx = idx;
+  const t = AppState.csv.thicknesses[idx];
+  document.getElementById('thickness-num').value = t;
+  autoReSmooth('gen');
+  if (AppState.autoRun) runDetection('gen');
+  updatePlots();
+}
+
+function onThicknessNumInput(val) {
+  const target = parseFloat(val);
+  const ts = AppState.csv.thicknesses;
+  if (!ts.length || isNaN(target)) return;
+  let bestIdx = 0, bestDiff = Infinity;
+  for (let i = 0; i < ts.length; i++) {
+    const d = Math.abs(ts[i] - target);
+    if (d < bestDiff) { bestDiff = d; bestIdx = i; }
+  }
+  AppState.csv.selectedIdx = bestIdx;
+  document.getElementById('thickness-slider').value = bestIdx;
+  autoReSmooth('gen');
+  if (AppState.autoRun) runDetection('gen');
+  updatePlots();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Excel / Experiment Loading
+// ═══════════════════════════════════════════════════════════════
+
+function onDragOver(e) {
+  e.preventDefault();
+  document.getElementById('excel-drop').classList.add('dragover');
+}
+function onDragLeave() {
+  document.getElementById('excel-drop').classList.remove('dragover');
+}
+function onExcelDrop(e) {
+  e.preventDefault();
+  document.getElementById('excel-drop').classList.remove('dragover');
+  if (e.dataTransfer.files[0]) processExcelFile(e.dataTransfer.files[0]);
+}
+function onExcelFileSelected(e) {
+  if (e.target.files[0]) processExcelFile(e.target.files[0]);
+}
+
+function processExcelFile(file) {
+  AppState.excel.file = file;
+  showLoading('Reading experiment file...');
+  const reader = new FileReader();
+  const isCsv = file.name.toLowerCase().endsWith('.csv');
+  reader.onload = (e) => {
+    try {
+      setTimeout(() => {
+        if (isCsv) {
+          const lines = e.target.result.split('\n').filter(l => l.trim());
+          const rows = lines.map(l => l.split(',').map(v => v.trim()));
+          storeExcelRows(rows, file.name);
+        } else {
+          const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+          AppState.excel.workbook = wb;
+          // Populate sheet selector when multiple sheets exist
+          const sheetRow = document.getElementById('excel-sheet-row');
+          const sheetSel = document.getElementById('excel-sheet-select');
+          if (wb.SheetNames.length > 1) {
+            sheetSel.innerHTML = wb.SheetNames.map(n => `<option value="${n}">${n}</option>`).join('');
+            sheetRow.style.display = 'flex';
+          } else {
+            sheetRow.style.display = 'none';
+          }
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+          storeExcelRows(rows, file.name);
+        }
+      }, 10);
+    } catch (err) {
+      hideLoading();
+      setStatus('Error reading file: ' + err.message);
+    }
+  };
+  if (isCsv) reader.readAsText(file);
+  else reader.readAsArrayBuffer(file);
+}
+
+function onExcelSheetChange() {
+  const wb = AppState.excel.workbook;
+  if (!wb) return;
+  const sheetName = document.getElementById('excel-sheet-select').value;
+  const ws = wb.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  storeExcelRows(rows, sheetName);
+}
+
+function storeExcelRows(rows, filename) {
+  AppState.excel._rawRows = rows;
+  parseExcelByFormat();
+
+  const n = AppState.excel.spectra.length;
+  const el = document.getElementById('excel-drop');
+  el.classList.add('loaded');
+  el.innerHTML = `<div>&#10003; ${filename}</div><div style="font-size:10px;margin-top:3px">${n} spectra</div>`;
+
+  document.getElementById('excel-info').textContent =
+    `Loaded: ${n} spectra × ${AppState.excel.wavelengths.length} pts`;
+  document.getElementById('excel-controls').style.display = 'block';
+
+  const idxEl = document.getElementById('excel-idx');
+  idxEl.value = 0;
+  idxEl.max = n - 1;
+  document.getElementById('excel-idx-hint').textContent = `/ ${n - 1}`;
+  updateExcelIdxButtons();
+
+  hideLoading();
+  setStatus(`Experiment file loaded — ${n} spectra`);
+  updatePlots();
+}
+
+function parseExcelByFormat() {
+  const rows = AppState.excel._rawRows;
+  if (!rows || !rows.length) return;
+  const fmt = document.getElementById('excel-format').value;
+  AppState.excel.format = fmt;
+
+  if (fmt === 'B') {
+    // Last row = wavelengths (last value excluded), other rows = spectra
+    const wlRow = rows[rows.length - 1];
+    const wavelengths = wlRow.slice(0, -1).map(Number).filter(v => !isNaN(v) && v > 0);
+    const spectra = [], thicknesses = [];
+    for (let i = 0; i < rows.length - 1; i++) {
+      const row = rows[i];
+      const t = parseFloat(row[row.length - 1]);
+      spectra.push(row.slice(0, -1).map(Number));
+      thicknesses.push(isNaN(t) ? null : t);
+    }
+    AppState.excel.wavelengths = wavelengths;
+    AppState.excel.spectra = spectra;
+    AppState.excel.thicknesses = thicknesses;
+  } else {
+    // Format A: col 0 = wavelengths, remaining cols = spectra
+    const wavelengths = rows.map(r => parseFloat(r[0])).filter(v => !isNaN(v));
+    const nCols = rows[0] ? rows[0].length : 0;
+    const spectra = [];
+    for (let c = 1; c < nCols; c++) {
+      spectra.push(rows.map(r => parseFloat(r[c])));
+    }
+    AppState.excel.wavelengths = wavelengths;
+    AppState.excel.spectra = spectra;
+    AppState.excel.thicknesses = [];
+  }
+}
+
+function onExcelFormatChange() {
+  if (!AppState.excel._rawRows) return;
+  parseExcelByFormat();
+  const n = AppState.excel.spectra.length;
+  document.getElementById('excel-idx').max = n - 1;
+  document.getElementById('excel-idx-hint').textContent = `/ ${n - 1}`;
+  document.getElementById('excel-info').textContent =
+    `Loaded: ${n} spectra × ${AppState.excel.wavelengths.length} pts`;
+  updateExcelIdxButtons();
+  updatePlots();
+}
+
+function onExcelIdxChange(val) {
+  const n = AppState.excel.spectra.length;
+  const idx = Math.max(0, Math.min(parseInt(val) || 0, n - 1));
+  AppState.excel.selectedIdx = idx;
+  autoReSmooth('exp');
+  updatePlots();
+  updateExcelIdxButtons();
+}
+
+function stepExcelIdx(delta) {
+  const el = document.getElementById('excel-idx');
+  const n = AppState.excel.spectra.length;
+  if (!n) return;
+  const cur = parseInt(el.value) || 0;
+  const next = Math.max(0, Math.min(cur + delta, n - 1));
+  el.value = next;
+  onExcelIdxChange(next);
+}
+
+function updateExcelIdxButtons() {
+  const el = document.getElementById('excel-idx');
+  const n = AppState.excel.spectra.length;
+  const cur = parseInt(el.value) || 0;
+  const btnPrev = document.getElementById('excel-idx-prev');
+  const btnNext = document.getElementById('excel-idx-next');
+  if (btnPrev) btnPrev.disabled = cur <= 0 || !n;
+  if (btnNext) btnNext.disabled = cur >= n - 1 || !n;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  updatePlots — render both charts
+// ═══════════════════════════════════════════════════════════════
+
+function updatePlots() {
+  updateGenChart();
+  updateExpChart();
+  updateValleyTable();
+}
+
+function getWlRange() {
+  const minVal = parseFloat(document.getElementById('wl-min').value);
+  const maxVal = parseFloat(document.getElementById('wl-max').value);
+  return {
+    min: isNaN(minVal) ? null : minVal,
+    max: isNaN(maxVal) ? null : maxVal,
+  };
+}
+
+// Filter x/y arrays to wavelength range; returns { x, y, origIndices }
+function filterByWlRange(xs, ys, range) {
+  if (!range.min && !range.max) return { x: xs, y: ys };
+  const x = [], y = [];
+  for (let i = 0; i < xs.length; i++) {
+    const wl = xs[i];
+    if ((range.min == null || wl >= range.min) && (range.max == null || wl <= range.max)) {
+      x.push(wl); y.push(ys[i]);
+    }
+  }
+  return { x, y };
+}
+
+// Resample x/y to a custom uniform step via linear interpolation (display only)
+function applyCustomStep(x, y) {
+  if (!document.getElementById('wl-step-enable').checked) return { x, y };
+  const step = parseFloat(document.getElementById('wl-step-size').value);
+  if (isNaN(step) || step <= 0 || x.length < 2) return { x, y };
+  const xMin = x[0], xMax = x[x.length - 1];
+  const newX = [];
+  for (let w = xMin; w <= xMax + 1e-9; w = +(w + step).toFixed(10)) newX.push(+w.toFixed(8));
+  const newY = newX.map(w => {
+    let lo = 0, hi = x.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (x[m] <= w) lo = m; else hi = m; }
+    if (w <= x[lo]) return y[lo];
+    if (w >= x[hi]) return y[hi];
+    const t = (w - x[lo]) / (x[hi] - x[lo]);
+    return y[lo] * (1 - t) + y[hi] * t;
+  });
+  return { x: newX, y: newY };
+}
+
+function updateGenChart() {
+  const { wavelengths, spectra, thicknesses, selectedIdx } = AppState.csv;
+  const range = getWlRange();
+
+  if (!spectra.length) {
+    Plotly.react('gen-chart', [], emptyLayout('Generated Spectrum', 'Load CSV to display'));
+    return;
+  }
+
+  const t = thicknesses[selectedIdx];
+  const rawY = spectra[selectedIdx];
+  const { x: rx, y: ry } = filterByWlRange(wavelengths, rawY, range);
+  const { x, y } = applyCustomStep(rx, ry);
+
+  const traces = [
+    { x, y, type: 'scatter', mode: 'lines', name: 'raw',
+      line: { color: '#AEC6E8', width: 1.5 } },
+  ];
+
+  // Add smooth trace if cached
+  const sm = AppState.smoothing.gen;
+  if (sm.cached && sm.cachedIdx === selectedIdx) {
+    const { x: srx, y: sry } = filterByWlRange(wavelengths, sm.cached, range);
+    const { x: sx, y: sy } = applyCustomStep(srx, sry);
+    traces.push({ x: sx, y: sy, type: 'scatter', mode: 'lines', name: 'smooth',
+      line: { color: '#1f77b4', width: 2.5 } });
+  }
+
+  const gV = AppState.valleys.gen, gP = AppState.peaks.gen;
+  const shapes = [
+    ...buildGapShapes(AppState.gapMask.intervals),
+    ...buildValleyShapes(gV, '#1f77b4', 'dash'),   // valleys: blue dash
+    ...buildValleyShapes(gP, '#2ca02c', 'dot'),    // peaks: green dot
+  ];
+  const annots = [
+    ...buildValleyAnnotations(gV, '#1f77b4'),
+    ...buildValleyAnnotations(gP, '#2ca02c'),
+  ];
+  // Dummy legend entries to label line styles
+  if (gV.length) traces.push({ x:[null], y:[null], type:'scatter', mode:'lines',
+    name:'— Valley', line:{color:'#1f77b4', width:1.5, dash:'dash'}, showlegend:true });
+  if (gP.length) traces.push({ x:[null], y:[null], type:'scatter', mode:'lines',
+    name:'··· Peak', line:{color:'#2ca02c', width:1.5, dash:'dot'}, showlegend:true });
+  const layout = spectrumLayout(
+    `Generated Spectrum — t = ${t.toFixed(1)} nm${valleyLabelSuffix(gV, gP)}`,
+    range, shapes, annots
+  );
+
+  Plotly.react('gen-chart', traces, layout, plotConfig());
+  setStatusRight(`Gen: t = ${t.toFixed(1)} nm`);
+}
+
+function updateExpChart() {
+  const { wavelengths, spectra, thicknesses, selectedIdx } = AppState.excel;
+  const range = getWlRange();
+
+  if (!spectra.length) {
+    Plotly.react('exp-chart', [], emptyLayout('Experimental Spectrum', 'Load experiment file to display'));
+    return;
+  }
+
+  const idx = selectedIdx;
+  const t = thicknesses[idx];
+  const rawY = spectra[idx];
+  const { x: rx, y: ry } = filterByWlRange(wavelengths, rawY, range);
+  const { x, y } = applyCustomStep(rx, ry);
+  const titleSuffix = (t != null) ? ` — t = ${(+t).toFixed(1)} nm` : ` — index ${idx}`;
+
+  const traces = [
+    { x, y, type: 'scatter', mode: 'lines', name: 'raw',
+      line: { color: '#F4A9A8', width: 1.5 } },
+  ];
+
+  // Add smooth trace if cached
+  const sm = AppState.smoothing.exp;
+  if (sm.cached && sm.cachedIdx === idx) {
+    const { x: srx, y: sry } = filterByWlRange(wavelengths, sm.cached, range);
+    const { x: sx, y: sy } = applyCustomStep(srx, sry);
+    traces.push({ x: sx, y: sy, type: 'scatter', mode: 'lines', name: 'smooth',
+      line: { color: '#8B0000', width: 2.5 } });
+  }
+
+  const eV = AppState.valleys.exp, eP = AppState.peaks.exp;
+  const shapes = [
+    ...buildGapShapes(AppState.gapMask.intervals),
+    ...buildValleyShapes(eV, '#8B0000', 'dash'),   // valleys: dark-red dash
+    ...buildValleyShapes(eP, '#2ca02c', 'dot'),    // peaks: green dot
+  ];
+  const annots = [
+    ...buildValleyAnnotations(eV, '#8B0000'),
+    ...buildValleyAnnotations(eP, '#2ca02c'),
+  ];
+  // Dummy legend entries to label line styles
+  if (eV.length) traces.push({ x:[null], y:[null], type:'scatter', mode:'lines',
+    name:'— Valley', line:{color:'#8B0000', width:1.5, dash:'dash'}, showlegend:true });
+  if (eP.length) traces.push({ x:[null], y:[null], type:'scatter', mode:'lines',
+    name:'··· Peak', line:{color:'#2ca02c', width:1.5, dash:'dot'}, showlegend:true });
+  const layout = spectrumLayout(
+    `Experimental Spectrum${titleSuffix}${valleyLabelSuffix(eV, eP)}`,
+    range, shapes, annots
+  );
+  Plotly.react('exp-chart', traces, layout, plotConfig());
+}
+
+// Optimal monotone matching via DP — pairs each valley with its closest counterpart.
+// Both arrays must be sorted ascending (wavelengths are always sorted).
+// Returns array of [genWl | null, expWl | null] pairs.
+function matchValleys(gen, exp) {
+  if (!gen.length && !exp.length) return [];
+  if (!gen.length) return exp.map(e => [null, e]);
+  if (!exp.length) return gen.map(g => [g, null]);
+
+  const m = gen.length, n = exp.length;
+  const SKIP = 1e9;   // penalty for leaving a valley unmatched
+
+  // dp[i][j] = min cost after processing gen[0..i-1] and exp[0..j-1]
+  const dp = Array.from({length: m + 1}, () => new Float64Array(n + 1).fill(Infinity));
+  dp[0][0] = 0;
+  for (let i = 0; i <= m; i++) {
+    for (let j = 0; j <= n; j++) {
+      if (!isFinite(dp[i][j])) continue;
+      if (i < m) dp[i+1][j] = Math.min(dp[i+1][j], dp[i][j] + SKIP);
+      if (j < n) dp[i][j+1] = Math.min(dp[i][j+1], dp[i][j] + SKIP);
+      if (i < m && j < n)
+        dp[i+1][j+1] = Math.min(dp[i+1][j+1], dp[i][j] + Math.abs(gen[i] - exp[j]));
+    }
+  }
+
+  // Backtrack to recover the actual pairing
+  const pairs = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 &&
+        dp[i][j] === dp[i-1][j-1] + Math.abs(gen[i-1] - exp[j-1])) {
+      pairs.unshift([gen[i-1], exp[j-1]]);
+      i--; j--;
+    } else if (i > 0 && dp[i][j] === dp[i-1][j] + SKIP) {
+      pairs.unshift([gen[i-1], null]);
+      i--;
+    } else {
+      pairs.unshift([null, exp[j-1]]);
+      j--;
+    }
+  }
+  return pairs;
+}
+
+function updateValleyTable() {
+  const genV = AppState.valleys.gen, expV = AppState.valleys.exp;
+  const genP = AppState.peaks.gen,   expP = AppState.peaks.exp;
+  const tbody   = document.getElementById('valley-tbody');
+  const statsEl = document.getElementById('vt-stats');
+
+  const hasValleys = genV.length || expV.length;
+  const hasPeaks   = genP.length || expP.length;
+
+  if (!hasValleys && !hasPeaks) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:#bbb;padding:14px;text-align:center;font-size:11px;">Run Detect on both spectra</td></tr>';
+    statsEl.style.display = 'none';
+    return;
+  }
+
+  const thr       = parseFloat(document.getElementById('vt-thr-green').value)  || 10;
+  const thrOrange = parseFloat(document.getElementById('vt-thr-orange').value) || 20;
+
+  // Compute pairs once — reused for both stats and table rows
+  const valleyPairs = hasValleys ? matchValleys(genV, expV) : [];
+  const peakPairs   = hasPeaks   ? matchValleys(genP, expP) : [];
+
+  // ── Summary stats ──────────────────────────────────────
+  const vDiffs   = valleyPairs.filter(([g,e]) => g!=null && e!=null).map(([g,e]) => Math.abs(g-e));
+  const pDiffs   = peakPairs.filter(([g,e])   => g!=null && e!=null).map(([g,e]) => Math.abs(g-e));
+  const allDiffs = [...vDiffs, ...pDiffs];
+  const avg = arr => arr.length
+    ? (arr.reduce((s,v) => s+v, 0) / arr.length).toFixed(1) + ' nm'
+    : '—';
+  if (allDiffs.length) {
+    document.getElementById('vt-stat-overall').textContent = avg(allDiffs);
+    document.getElementById('vt-stat-valleys').textContent = avg(vDiffs);
+    document.getElementById('vt-stat-peaks').textContent   = avg(pDiffs);
+    statsEl.style.display = 'block';
+  } else {
+    statsEl.style.display = 'none';
+  }
+
+  // ── Table rows ─────────────────────────────────────────
+  const maxDiff = parseFloat(document.getElementById('autofit-max-diff')?.value) || 30;
+  function sectionRows(pairs) {
+    let h = '';
+    pairs.forEach(([ga, ea], i) => {
+      const gTxt = ga != null ? ga.toFixed(1) : '<span class="dash">—</span>';
+      const eTxt = ea != null ? ea.toFixed(1) : '<span class="dash">—</span>';
+      let deltaTxt = '<span class="dash">—</span>', cls = '', rowBg = '';
+      if (ga != null && ea != null) {
+        const d = Math.abs(ga - ea);
+        deltaTxt = d.toFixed(1);
+        cls    = d <= thr ? 'dg' : d <= thrOrange ? 'dw' : 'db';
+        rowBg  = d >= maxDiff ? 'background:#fff3e0;' : '';
+      }
+      h += `<tr style="${rowBg}"><td>${i + 1}</td><td>${gTxt}</td><td>${eTxt}</td><td class="${cls}">${deltaTxt}</td></tr>`;
+    });
+    return h;
+  }
+
+  let html = '';
+
+  if (hasValleys) {
+    if (hasPeaks)
+      html += `<tr><td colspan="4" style="background:#e8eaf6;color:#1f77b4;font-size:10px;font-weight:700;padding:3px 6px;text-align:left;">▾ Valleys</td></tr>`;
+    html += sectionRows(valleyPairs);
+  }
+
+  if (hasPeaks) {
+    if (hasValleys)
+      html += `<tr><td colspan="4" style="background:#e8f5e9;color:#2ca02c;font-size:10px;font-weight:700;padding:3px 6px;text-align:left;">▴ Peaks</td></tr>`;
+    html += sectionRows(peakPairs);
+  }
+
+  tbody.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Plotly layout helpers
+// ═══════════════════════════════════════════════════════════════
+
+function emptyLayout(title, annotation) {
+  return {
+    title: { text: title, font: { size: 12, color: '#555' } },
+    xaxis: { title: 'Wavelength (nm)', showgrid: true, gridcolor: '#f0f0f0' },
+    yaxis: { title: 'Reflectance',    showgrid: true, gridcolor: '#f0f0f0' },
+    plot_bgcolor: 'white', paper_bgcolor: 'white',
+    margin: { l: 52, r: 12, t: 36, b: 56 },
+    font: { family: 'Segoe UI, sans-serif', size: 11 },
+    annotations: annotation ? [{
+      xref: 'paper', yref: 'paper', x: 0.5, y: 0.5,
+      text: annotation, showarrow: false,
+      font: { color: '#ccc', size: 13 },
+    }] : [],
+  };
+}
+
+function spectrumLayout(title, range, shapes, annotations) {
+  const layout = {
+    title: { text: title, font: { size: 12, color: '#333' } },
+    xaxis: {
+      title: 'Wavelength (nm)',
+      showgrid: true, gridcolor: '#f0f0f0', gridwidth: 1,
+      zeroline: false,
+    },
+    yaxis: {
+      title: 'Reflectance',
+      showgrid: true, gridcolor: '#f0f0f0', gridwidth: 1,
+      zeroline: false,
+    },
+    plot_bgcolor: 'white',
+    paper_bgcolor: 'white',
+    margin: { l: 52, r: 12, t: 36, b: 56 },
+    showlegend: true,
+    legend: { x: 1, xanchor: 'right', y: 1, font: { size: 10 }, bgcolor: 'rgba(255,255,255,0.8)' },
+    font: { family: 'Segoe UI, sans-serif', size: 11 },
+    shapes: shapes || [],
+    annotations: annotations || [],
+  };
+  if (range.min != null) layout.xaxis.range = [range.min, range.max ?? undefined];
+  return layout;
+}
+
+// Build dashed vertical lines for detected valleys / peaks
+function buildValleyShapes(wavelengths, color, dash) {
+  return wavelengths.map(wl => ({
+    type: 'line',
+    x0: wl, x1: wl, y0: 0, y1: 1, yref: 'paper',
+    line: { color, width: 1.2, dash: dash || 'dot' },
+  }));
+}
+
+// Build gap-mask shaded rectangles (grey bands, behind the spectrum)
+function buildGapShapes(intervals) {
+  return intervals.map(g => ({
+    type: 'rect',
+    x0: g.wlMin, x1: g.wlMax, y0: 0, y1: 1, yref: 'paper',
+    fillcolor: 'rgba(180,180,180,0.15)', line: { width: 0 },
+    layer: 'below',
+  }));
+}
+
+// Rotated wavelength labels along top of chart
+function buildValleyAnnotations(wavelengths, color) {
+  return wavelengths.map(wl => ({
+    x: wl, yref: 'paper', y: 0.98,
+    text: wl.toFixed(1),
+    showarrow: false,
+    font: { size: 8, color },
+    textangle: -90,
+    xanchor: 'center', yanchor: 'top',
+  }));
+}
+
+function valleyLabelSuffix(valleys, peaks) {
+  const parts = [];
+  if (valleys && valleys.length) parts.push(`${valleys.length} valleys`);
+  if (peaks  && peaks.length)   parts.push(`${peaks.length} peaks`);
+  return parts.length ? `,  ${parts.join(', ')}` : '';
+}
+
+function plotConfig() {
+  return {
+    responsive: true,
+    displayModeBar: true,
+    modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+    displaylogo: false,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Auto-Run toggle
+// ═══════════════════════════════════════════════════════════════
+
+function toggleAutoRun() {
+  AppState.autoRun = !AppState.autoRun;
+  const btn = document.getElementById('auto-run-btn');
+  if (AppState.autoRun) {
+    btn.textContent = '⏸ Auto-Run: ON';
+    btn.className = 'action-btn state-on';
+  } else {
+    btn.textContent = '▶ Auto-Run: OFF';
+    btn.className = 'action-btn state-off';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Overlay modal — both spectra on one Plotly chart
+// ═══════════════════════════════════════════════════════════════
+
+let _overlayShowMarkers = true;  // default: show valley/peak lines
+
+function toggleOverlayMarkers() {
+  _overlayShowMarkers = !_overlayShowMarkers;
+  const btn = document.getElementById('overlay-markers-btn');
+  if (_overlayShowMarkers) {
+    btn.textContent = 'Hide Markers';
+    btn.style.background = 'rgba(255,255,255,0.12)';
+    btn.style.color = '#e8eaf6';
+  } else {
+    btn.textContent = 'Show Markers';
+    btn.style.background = 'rgba(239,83,80,0.25)';
+    btn.style.color = '#ffcdd2';
+  }
+  renderOverlayChart();
+}
+
+function openOverlay() {
+  // Sync button text with current state when modal opens
+  const btn = document.getElementById('overlay-markers-btn');
+  if (btn) {
+    btn.textContent = _overlayShowMarkers ? 'Hide Markers' : 'Show Markers';
+    btn.style.background = _overlayShowMarkers ? 'rgba(255,255,255,0.12)' : 'rgba(239,83,80,0.25)';
+    btn.style.color = _overlayShowMarkers ? '#e8eaf6' : '#ffcdd2';
+  }
+  document.getElementById('overlay-modal').classList.add('show');
+  renderOverlayChart();
+}
+
+function closeOverlay() {
+  document.getElementById('overlay-modal').classList.remove('show');
+}
+
+// Close when clicking the dark backdrop (not the box itself)
+function onOverlayBackdrop(e) {
+  if (e.target === document.getElementById('overlay-modal')) closeOverlay();
+}
+
+function renderOverlayChart() {
+  const traces = [];
+  const range  = getWlRange();
+
+  // Generated spectrum traces
+  const { wavelengths: gWl, spectra: gSpec, thicknesses: gT, selectedIdx: gIdx } = AppState.csv;
+  if (gSpec.length) {
+    const { x, y } = filterByWlRange(gWl, gSpec[gIdx], range);
+    traces.push({ x, y, type: 'scatter', mode: 'lines',
+      name: `Gen raw  t=${gT[gIdx].toFixed(1)} nm`,
+      line: { color: '#AEC6E8', width: 1.5 } });
+
+    const sm = AppState.smoothing.gen;
+    if (sm.cached && sm.cachedIdx === gIdx) {
+      const { x: sx, y: sy } = filterByWlRange(gWl, sm.cached, range);
+      traces.push({ x: sx, y: sy, type: 'scatter', mode: 'lines',
+        name: 'Gen smooth',
+        line: { color: '#1f77b4', width: 2.5 } });
+    }
+  }
+
+  // Experimental spectrum traces
+  const { wavelengths: eWl, spectra: eSpec, thicknesses: eT, selectedIdx: eIdx } = AppState.excel;
+  if (eSpec.length) {
+    const et = eT[eIdx];
+    const label = et != null ? ` t=${(+et).toFixed(1)} nm` : ` #${eIdx}`;
+    const { x, y } = filterByWlRange(eWl, eSpec[eIdx], range);
+    traces.push({ x, y, type: 'scatter', mode: 'lines',
+      name: `Exp raw${label}`,
+      line: { color: '#F4A9A8', width: 1.5 } });
+
+    const sm = AppState.smoothing.exp;
+    if (sm.cached && sm.cachedIdx === eIdx) {
+      const { x: sx, y: sy } = filterByWlRange(eWl, sm.cached, range);
+      traces.push({ x: sx, y: sy, type: 'scatter', mode: 'lines',
+        name: 'Exp smooth',
+        line: { color: '#8B0000', width: 2.5 } });
+    }
+  }
+
+  // Valley/peak lines from both spectra (conditional on toggle)
+  const gV = AppState.valleys.gen, gP = AppState.peaks.gen;
+  const eV = AppState.valleys.exp, eP = AppState.peaks.exp;
+  const shapes = _overlayShowMarkers ? [
+    ...buildGapShapes(AppState.gapMask.intervals),
+    ...buildValleyShapes(gV, '#1f77b4', 'dash'),
+    ...buildValleyShapes(eV, '#8B0000', 'dash'),
+    ...buildValleyShapes(gP, '#2ca02c', 'dot'),
+    ...buildValleyShapes(eP, '#2ca02c', 'dot'),
+  ] : [];
+  const annots = _overlayShowMarkers ? [
+    ...buildValleyAnnotations(gV, '#1f77b4'),
+    ...buildValleyAnnotations(eV, '#8B0000'),
+    ...buildValleyAnnotations(gP, '#2ca02c'),
+    ...buildValleyAnnotations(eP, '#2ca02c'),
+  ] : [];
+  if (_overlayShowMarkers) {
+    if (gV.length || eV.length) traces.push({ x:[null], y:[null], type:'scatter', mode:'lines',
+      name:'— Valley', line:{color:'#888', width:1.5, dash:'dash'}, showlegend:true });
+    if (gP.length || eP.length) traces.push({ x:[null], y:[null], type:'scatter', mode:'lines',
+      name:'··· Peak', line:{color:'#2ca02c', width:1.5, dash:'dot'}, showlegend:true });
+  }
+
+  const layout = {
+    title: { text: 'Spectrum Overlay — Generated vs Experimental', font: { size: 13 } },
+    xaxis: { title: 'Wavelength (nm)', showgrid: true, gridcolor: '#f0f0f0', zeroline: false },
+    yaxis: { title: 'Reflectance',    showgrid: true, gridcolor: '#f0f0f0', zeroline: false },
+    plot_bgcolor: 'white', paper_bgcolor: 'white',
+    margin: { l: 55, r: 15, t: 42, b: 55 },
+    showlegend: true,
+    legend: { x: 1, xanchor: 'right', y: 1, bgcolor: 'rgba(255,255,255,0.85)', font: { size: 11 } },
+    font: { family: 'Segoe UI, sans-serif', size: 12 },
+    shapes, annotations: annots,
+  };
+
+  Plotly.react('overlay-chart', traces, layout,
+    { responsive: true, displayModeBar: true,
+      modeBarButtonsToRemove: ['lasso2d','select2d'], displaylogo: false });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Control Panel toggle
+// ═══════════════════════════════════════════════════════════════
+
+function toggleCtrl() {
+  const panel = document.getElementById('ctrl-panel');
+  const arrow = document.getElementById('ctrl-arrow');
+  const open = panel.classList.toggle('open');
+  arrow.textContent = open ? '▼' : '▶';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Utility
+// ═══════════════════════════════════════════════════════════════
+
+function showLoading(msg) {
+  document.getElementById('loading-msg').textContent = msg || 'Loading...';
+  document.getElementById('loading-overlay').classList.add('show');
+}
+function setLoadingMsg(msg) {
+  document.getElementById('loading-msg').textContent = msg;
+}
+function hideLoading() {
+  document.getElementById('loading-overlay').classList.remove('show');
+}
+function setStatus(msg) {
+  document.getElementById('status-text').textContent = msg;
+}
+function setStatusRight(msg) {
+  document.getElementById('status-right').textContent = msg;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Matrix utilities (for SG polynomial least squares)
+// ═══════════════════════════════════════════════════════════════
+
+function matMul(A, B) {
+  const r = A.length, c = B[0].length, k = B.length;
+  return Array.from({length: r}, (_, i) =>
+    Array.from({length: c}, (_, j) =>
+      Array.from({length: k}, (_, m) => A[i][m] * B[m][j]).reduce((a, b) => a + b, 0)
+    )
+  );
+}
+
+function matTranspose(A) {
+  return A[0].map((_, j) => A.map(r => r[j]));
+}
+
+// Gauss-Jordan elimination matrix inversion (works for up to ~8×8)
+function matInv(M) {
+  const n = M.length;
+  const aug = M.map((row, i) => {
+    const id = Array(n).fill(0); id[i] = 1;
+    return [...row, ...id];
+  });
+  for (let col = 0; col < n; col++) {
+    let maxRow = col;
+    for (let row = col + 1; row < n; row++)
+      if (Math.abs(aug[row][col]) > Math.abs(aug[maxRow][col])) maxRow = row;
+    [aug[col], aug[maxRow]] = [aug[maxRow], aug[col]];
+    const pivot = aug[col][col];
+    if (Math.abs(pivot) < 1e-12) throw new Error('Singular matrix in SG computation');
+    for (let j = 0; j < 2 * n; j++) aug[col][j] /= pivot;
+    for (let row = 0; row < n; row++) {
+      if (row === col) continue;
+      const f = aug[row][col];
+      for (let j = 0; j < 2 * n; j++) aug[row][j] -= f * aug[col][j];
+    }
+  }
+  return aug.map(row => row.slice(n));
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Polynomial fit / eval (for SG edge handling)
+// ═══════════════════════════════════════════════════════════════
+
+// Least-squares polynomial fit to paired (xs, ys), returns coefficients [c0..cp]
+function polyFit(xs, ys, p) {
+  const A = xs.map(xi => Array.from({length: p + 1}, (_, j) => Math.pow(xi, j)));
+  const AT = matTranspose(A);
+  const ATA = matMul(AT, A);
+  const ATy = AT.map(row => row.reduce((s, v, i) => s + v * ys[i], 0));
+  const inv = matInv(ATA);
+  return inv.map(row => row.reduce((s, v, i) => s + v * ATy[i], 0));
+}
+
+function polyEval(coeffs, x) {
+  return coeffs.reduce((s, c, i) => s + c * Math.pow(x, i), 0);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Savitzky-Golay filter
+//  Equivalent to scipy.signal.savgol_filter(y, window_length, polyorder)
+// ═══════════════════════════════════════════════════════════════
+
+// Cache kernels keyed by "w,p" to avoid recomputation
+const _sgCache = new Map();
+
+// Compute convolution kernel for interior points
+function _computeSgKernel(w, p) {
+  const hw = Math.floor(w / 2);
+  const x = Array.from({length: w}, (_, i) => i - hw);
+  // Design matrix: rows = window positions, cols = poly powers
+  const A = x.map(xi => Array.from({length: p + 1}, (_, j) => Math.pow(xi, j)));
+  const AT = matTranspose(A);
+  const ATA = matMul(AT, A);
+  const ATAinv = matInv(ATA);
+  const P = matMul(ATAinv, AT);  // (p+1) x w  — pseudo-inverse of A
+  // Kernel = A[hw] @ P  (the hat matrix row at center)
+  const Ahw = A[hw];
+  return P[0].map((_, j) => Ahw.reduce((s, v, k) => s + v * P[k][j], 0));
+}
+
+function sgKernel(w, p) {
+  const key = `${w},${p}`;
+  if (!_sgCache.has(key)) _sgCache.set(key, _computeSgKernel(w, p));
+  return _sgCache.get(key);
+}
+
+// Apply SG filter to 1-D array y
+function savgolFilter(y, windowLen, polyOrder) {
+  const n = y.length;
+  // Sanitise inputs
+  if (windowLen > n) windowLen = n % 2 === 0 ? n - 1 : n;
+  if (windowLen % 2 === 0) windowLen--;
+  if (windowLen < 3) windowLen = 3;
+  polyOrder = Math.min(polyOrder, windowLen - 1);
+
+  const hw = Math.floor(windowLen / 2);
+  const kernel = sgKernel(windowLen, polyOrder);
+  const result = new Array(n);
+
+  // Interior points: direct convolution
+  for (let i = hw; i < n - hw; i++) {
+    let s = 0;
+    for (let k = 0; k < windowLen; k++) s += kernel[k] * y[i - hw + k];
+    result[i] = s;
+  }
+
+  // x-axis for polynomial fitting (centred at 0)
+  const xFit = Array.from({length: windowLen}, (_, i) => i - hw);
+
+  // Left edge: fit polynomial on first windowLen points, evaluate at edge positions
+  const lCoeffs = polyFit(xFit, Array.from(y.slice(0, windowLen)), polyOrder);
+  for (let i = 0; i < hw; i++) result[i] = polyEval(lCoeffs, i - hw);
+
+  // Right edge: fit polynomial on last windowLen points
+  const rCoeffs = polyFit(xFit, Array.from(y.slice(n - windowLen)), polyOrder);
+  for (let i = n - hw; i < n; i++) result[i] = polyEval(rCoeffs, i - (n - 1 - hw));
+
+  return result;
+}
+
+// Apply segmented SG: each segment may override window/poly for a wavelength range
+// Falls back to default (window=51, poly=3) for uncovered regions
+function applySegmentedSG(y, wavelengths, segments) {
+  const n = y.length;
+  const DEFAULT_W = 51, DEFAULT_P = 3;
+
+  // Build per-index window/poly arrays
+  const W = new Uint16Array(n).fill(DEFAULT_W);
+  const P = new Uint8Array(n).fill(DEFAULT_P);
+
+  for (const seg of segments) {
+    const lo = seg.wlMin != null ? seg.wlMin : -Infinity;
+    const hi = seg.wlMax != null ? seg.wlMax : Infinity;
+    const w = seg.window || DEFAULT_W;
+    const p = seg.poly  || DEFAULT_P;
+    for (let i = 0; i < n; i++) {
+      if (wavelengths[i] >= lo && wavelengths[i] <= hi) { W[i] = w; P[i] = p; }
+    }
+  }
+
+  // Group consecutive indices with the same params, apply SG per group
+  const result = new Array(n);
+  let i = 0;
+  while (i < n) {
+    const w = W[i], p = P[i];
+    let j = i + 1;
+    while (j < n && W[j] === w && P[j] === p) j++;
+    const chunk = Array.from(y.slice(i, j));
+    const sm = savgolFilter(chunk, w, p);
+    for (let k = 0; k < sm.length; k++) result[i + k] = sm[k];
+    i = j;
+  }
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  find_peaks — equivalent to scipy.signal.find_peaks
+// ═══════════════════════════════════════════════════════════════
+
+// Compute prominence of each peak (height above its base contour)
+function calcProminences(peakIdxs, y) {
+  const n = y.length;
+  return peakIdxs.map(p => {
+    // Walk left until a higher point or edge; track minimum
+    let lMin = y[p];
+    for (let i = p - 1; i >= 0; i--) {
+      if (y[i] > y[p]) break;
+      if (y[i] < lMin) lMin = y[i];
+    }
+    // Walk right similarly
+    let rMin = y[p];
+    for (let i = p + 1; i < n; i++) {
+      if (y[i] > y[p]) break;
+      if (y[i] < rMin) rMin = y[i];
+    }
+    return y[p] - Math.max(lMin, rMin);
+  });
+}
+
+// Core find_peaks: returns array of indices
+function findPeaks(y, { height = null, distance = 1, prominence = null } = {}) {
+  const n = y.length;
+
+  // 1 — local maxima (strictly greater on at least one side)
+  let peaks = [];
+  for (let i = 1; i < n - 1; i++) {
+    if (y[i] >= y[i - 1] && y[i] > y[i + 1]) peaks.push(i);
+  }
+
+  // 2 — height threshold
+  if (height !== null) peaks = peaks.filter(i => y[i] >= height);
+
+  // 3 — distance: keep the taller peak when two peaks are too close
+  if (distance > 1) {
+    const keep = new Uint8Array(peaks.length).fill(1);
+    for (let a = 0; a < peaks.length; a++) {
+      if (!keep[a]) continue;
+      for (let b = a + 1; b < peaks.length && peaks[b] - peaks[a] < distance; b++) {
+        if (!keep[b]) continue;
+        if (y[peaks[a]] >= y[peaks[b]]) keep[b] = 0;
+        else { keep[a] = 0; break; }
+      }
+    }
+    peaks = peaks.filter((_, i) => keep[i]);
+  }
+
+  // 4 — prominence threshold
+  if (prominence !== null) {
+    const proms = calcProminences(peaks, y);
+    peaks = peaks.filter((_, i) => proms[i] >= prominence);
+  }
+
+  return peaks;
+}
+
+// Remove peaks whose wavelength falls inside any exclusion interval
+function applyGapMask(peakIdxs, wavelengths, intervals) {
+  return peakIdxs.filter(idx => {
+    const wl = wavelengths[idx];
+    return !intervals.some(g => wl >= g.wlMin && wl <= g.wlMax);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Gap Mask UI
+// ═══════════════════════════════════════════════════════════════
+
+function initGapMask() { renderGapIntervals(); }
+
+function renderGapIntervals() {
+  const container = document.getElementById('gap-mask-list');
+  const list = AppState.gapMask.intervals;
+  container.innerHTML = '';
+  list.forEach((g, idx) => {
+    const row = document.createElement('div');
+    row.className = 'gap-row';
+    row.innerHTML = `
+      <span class="sg-lbl">From:</span>
+      <input type="number" value="${g.wlMin}" step="1" placeholder="start"
+             oninput="AppState.gapMask.intervals[${idx}].wlMin=parseFloat(this.value)||0">
+      <span class="sg-lbl">To:</span>
+      <input type="number" value="${g.wlMax}" step="1" placeholder="end"
+             oninput="AppState.gapMask.intervals[${idx}].wlMax=parseFloat(this.value)||0">
+      <span class="sg-lbl">nm</span>
+      <button class="del-btn" onclick="removeGapInterval(${idx})" title="Remove">&#10005;</button>
+    `;
+    container.appendChild(row);
+  });
+}
+
+function addGapInterval() {
+  AppState.gapMask.intervals.push({ wlMin: 0, wlMax: 0 });
+  renderGapIntervals();
+}
+
+function removeGapInterval(idx) {
+  AppState.gapMask.intervals.splice(idx, 1);
+  renderGapIntervals();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Detection — param sync helpers
+// ═══════════════════════════════════════════════════════════════
+
+function syncDetectionParam(which, key, val) {
+  AppState.detection[which][key] = parseFloat(val) || 0;
+}
+function syncDetectionCheck(which, key, val) {
+  AppState.detection[which][key] = val;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  runDetection — main detection function (called from Detect button)
+// ═══════════════════════════════════════════════════════════════
+
+function runDetection(which) {
+  const dataState = which === 'gen' ? AppState.csv : AppState.excel;
+  const sm        = AppState.smoothing[which];
+  const idx       = dataState.selectedIdx;
+  const rawY      = dataState.spectra[idx];
+  const wls       = dataState.wavelengths;
+
+  if (!rawY || !wls.length) {
+    setStatus(`No ${which === 'gen' ? 'CSV' : 'experiment'} data loaded`);
+    return;
+  }
+
+  // Prefer smoothed data; fall back to raw
+  const y = (sm.cached && sm.cachedIdx === idx) ? sm.cached : rawY;
+
+  const p = AppState.detection[which];
+
+  // Convert distance from nm to sample indices
+  const spacing   = (wls[wls.length - 1] - wls[0]) / (wls.length - 1);
+  const distSamps = Math.max(1, Math.round(p.distanceNm / spacing));
+
+  const gaps = AppState.gapMask.intervals;
+
+  // Detect valleys (negate signal, then find peaks)
+  const valleys = [];
+  if (p.detectValleys) {
+    const negY = y.map(v => -v);
+    const raw = findPeaks(negY, {
+      height:     p.height !== 0 ? -p.height : null,
+      distance:   distSamps,
+      prominence: p.prominence,
+    });
+    applyGapMask(raw, wls, gaps).forEach(i => valleys.push(wls[i]));
+  }
+
+  // Detect peaks (positive direction)
+  const peaks = [];
+  if (p.detectPeaks) {
+    const raw = findPeaks(y, {
+      height:     p.height || null,
+      distance:   distSamps,
+      prominence: p.prominence,
+    });
+    applyGapMask(raw, wls, gaps).forEach(i => peaks.push(wls[i]));
+  }
+
+  AppState.valleys[which] = valleys;
+  AppState.peaks[which]   = peaks;
+
+  updatePlots();
+
+  const label = which === 'gen' ? 'Generated' : 'Experimental';
+  setStatus(`${label}: ${valleys.length} valley${valleys.length !== 1 ? 's' : ''}${peaks.length ? `, ${peaks.length} peak${peaks.length !== 1 ? 's' : ''}` : ''} detected`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Smoothing UI — segment management
+// ═══════════════════════════════════════════════════════════════
+
+// Default segments populated on init
+function initSgSegments() {
+  AppState.smoothing.gen.segments = [{ wlMin: null, wlMax: null, window: 51, poly: 3 }];
+  AppState.smoothing.exp.segments = [{ wlMin: null, wlMax: null, window: 51, poly: 3 }];
+  renderSgSegments('gen');
+  renderSgSegments('exp');
+}
+
+function renderSgSegments(which) {
+  const container = document.getElementById(`sg-${which}-segments`);
+  const segs = AppState.smoothing[which].segments;
+  container.innerHTML = '';
+  segs.forEach((seg, idx) => {
+    const row = document.createElement('div');
+    row.className = 'sg-seg';
+    row.id = `sg-${which}-seg-${idx}`;
+    row.innerHTML = `
+      <span class="sg-lbl">&#955;:</span>
+      <input type="number" placeholder="start" step="1" value="${seg.wlMin ?? ''}"
+             oninput="updateSgSeg('${which}',${idx},'wlMin',this.value)">
+      <input type="number" placeholder="end" step="1" value="${seg.wlMax ?? ''}"
+             oninput="updateSgSeg('${which}',${idx},'wlMax',this.value)">
+      <span class="sg-lbl">win:</span>
+      <input type="number" value="${seg.window}" min="3" step="2"
+             oninput="updateSgSeg('${which}',${idx},'window',this.value)">
+      <span class="sg-lbl">ord:</span>
+      <input type="number" value="${seg.poly}" min="1" max="10"
+             oninput="updateSgSeg('${which}',${idx},'poly',this.value)">
+      <button class="del-btn" onclick="removeSgSegment('${which}',${idx})" title="Remove">&#10005;</button>
+    `;
+    container.appendChild(row);
+  });
+}
+
+function updateSgSeg(which, idx, field, val) {
+  const segs = AppState.smoothing[which].segments;
+  const parsed = parseFloat(val);
+  if (field === 'wlMin' || field === 'wlMax') {
+    segs[idx][field] = isNaN(parsed) ? null : parsed;
+  } else {
+    segs[idx][field] = isNaN(parsed) ? (field === 'window' ? 51 : 3) : Math.floor(parsed);
+  }
+}
+
+function addSgSegment(which) {
+  AppState.smoothing[which].segments.push({ wlMin: null, wlMax: null, window: 51, poly: 3 });
+  renderSgSegments(which);
+}
+
+function removeSgSegment(which, idx) {
+  const segs = AppState.smoothing[which].segments;
+  if (segs.length <= 1) return;  // keep at least one segment
+  segs.splice(idx, 1);
+  renderSgSegments(which);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Apply / auto-re-smooth
+// ═══════════════════════════════════════════════════════════════
+
+// Called by "Apply" button — reads segments from UI and computes smooth
+function applySmoothing(which) {
+  const dataState = which === 'gen' ? AppState.csv : AppState.excel;
+  const sm = AppState.smoothing[which];
+  const idx = dataState.selectedIdx;
+  const rawY = dataState.spectra[idx];
+  const wls  = dataState.wavelengths;
+
+  if (!rawY || !rawY.length) {
+    setStatus(`No ${which === 'gen' ? 'CSV' : 'experiment'} data loaded yet`);
+    return;
+  }
+
+  sm.cached = applySegmentedSG(rawY, wls, sm.segments);
+  sm.cachedIdx = idx;
+  updatePlots();
+  setStatus(`${which === 'gen' ? 'Generated' : 'Experimental'} spectrum smoothed (${sm.segments.length} segment${sm.segments.length > 1 ? 's' : ''})`);
+}
+
+// Re-apply existing smooth params when spectrum index changes (no UI interaction needed)
+function autoReSmooth(which) {
+  const dataState = which === 'gen' ? AppState.csv : AppState.excel;
+  const sm = AppState.smoothing[which];
+  if (!sm.cached) return;   // no smooth applied yet — nothing to re-apply
+  const idx = dataState.selectedIdx;
+  const rawY = dataState.spectra[idx];
+  const wls  = dataState.wavelengths;
+  if (!rawY || !rawY.length) return;
+  sm.cached = applySegmentedSG(rawY, wls, sm.segments);
+  sm.cachedIdx = idx;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Auto-Fit Thickness — nearest-neighbour matching + penalty
+// ═══════════════════════════════════════════════════════════════
+
+// Greedy nearest-neighbour match: sort all pairs by distance, pick greedily.
+// Each valley (gen or exp) is used at most once.
+function nearestNeighborMatch(genValleys, expValleys) {
+  if (!genValleys.length || !expValleys.length) {
+    return { pairs: [], unmatchedGen: [...genValleys], unmatchedExp: [...expValleys] };
+  }
+  const candidates = [];
+  for (let g = 0; g < genValleys.length; g++) {
+    for (let e = 0; e < expValleys.length; e++) {
+      candidates.push({ g, e, dist: Math.abs(genValleys[g] - expValleys[e]) });
+    }
+  }
+  candidates.sort((a, b) => a.dist - b.dist);
+
+  const usedG = new Set(), usedE = new Set();
+  const pairs = [];
+  for (const c of candidates) {
+    if (!usedG.has(c.g) && !usedE.has(c.e)) {
+      pairs.push({ gen: genValleys[c.g], exp: expValleys[c.e], diff: c.dist });
+      usedG.add(c.g);
+      usedE.add(c.e);
+    }
+  }
+  const unmatchedGen = genValleys.filter((_, i) => !usedG.has(i));
+  const unmatchedExp = expValleys.filter((_, i) => !usedE.has(i));
+  return { pairs, unmatchedGen, unmatchedExp };
+}
+
+function autoFitThickness() {
+  const { wavelengths: wls, spectra, thicknesses } = AppState.csv;
+
+  const modeEl = document.querySelector('input[name="autofit-mode"]:checked');
+  const mode   = modeEl ? modeEl.value : 'valleys';
+
+  if (!spectra.length) { setStatus('Auto-fit: load CSV first'); return; }
+
+  // Auto-detect exp features before fitting
+  setStatus('Auto-detecting features before fitting…');
+  runDetection('exp');
+
+  const expValleys = AppState.valleys.exp;
+  const expPeaks   = AppState.peaks.exp;
+
+  if ((mode === 'valleys' || mode === 'both') && !expValleys.length) {
+    setStatus('Auto-fit: no experimental valleys detected — adjust detection params'); return;
+  }
+  if ((mode === 'peaks' || mode === 'both') && !expPeaks.length) {
+    setStatus('Auto-fit: no experimental peaks detected — adjust detection params'); return;
+  }
+
+  showLoading(`Auto-fitting… scanning ${spectra.length} spectra`);
+
+  setTimeout(() => {
+    const p          = AppState.detection.gen;
+    const penaltyVal = parseFloat(document.getElementById('autofit-penalty').value) || 100;
+    const spacing    = (wls[wls.length - 1] - wls[0]) / (wls.length - 1);
+    const distSamps  = Math.max(1, Math.round(p.distanceNm / spacing));
+    const gaps       = AppState.gapMask.intervals;
+
+    const rmseThreshold   = parseFloat(document.getElementById('autofit-max-diff').value) || 30;
+    const expFeatureCount = ((mode === 'valleys' || mode === 'both') ? expValleys.length : 0)
+                          + ((mode === 'peaks'   || mode === 'both') ? expPeaks.length   : 0);
+    const totalCosts      = new Float64Array(spectra.length).fill(Infinity);
+    const rmseArr         = new Float64Array(spectra.length).fill(NaN);
+    const emptyMatch      = { pairs: [], unmatchedGen: [], unmatchedExp: [] };
+
+    let bestCost = Infinity;
+    let bestIdx = 0, bestVM = emptyMatch, bestPM = emptyMatch;
+
+    for (let i = 0; i < spectra.length; i++) {
+      let genValleys = [], genPeaks = [];
+
+      if (mode === 'valleys' || mode === 'both') {
+        const negY = spectra[i].map(v => -v);
+        const rawV = findPeaks(negY, {
+          height: p.height !== 0 ? -p.height : null,
+          distance: distSamps, prominence: p.prominence,
+        });
+        genValleys = applyGapMask(rawV, wls, gaps).map(k => wls[k]);
+      }
+
+      if (mode === 'peaks' || mode === 'both') {
+        const rawPk = findPeaks(spectra[i], {
+          height: p.height || null,
+          distance: distSamps, prominence: p.prominence,
+        });
+        genPeaks = applyGapMask(rawPk, wls, gaps).map(k => wls[k]);
+      }
+
+      // Independent nearest-neighbour matching; emptyMatch when mode excludes the type
+      const vm = (mode === 'valleys' || mode === 'both')
+        ? nearestNeighborMatch(genValleys, expValleys) : emptyMatch;
+      const pm = (mode === 'peaks' || mode === 'both')
+        ? nearestNeighborMatch(genPeaks,   expPeaks)   : emptyMatch;
+
+      // Threshold: diff >= rmseThreshold → penalize with rmseThreshold² and mark as unmatched
+      let matchedSq = 0, matchedN = 0;
+      const extraUnmatchedGen = [], extraUnmatchedExp = [];
+      for (const pr of vm.pairs) {
+        if (pr.diff < rmseThreshold) {
+          matchedSq += pr.diff * pr.diff; matchedN++;
+        } else {
+          matchedSq += rmseThreshold * rmseThreshold; matchedN++;
+          extraUnmatchedGen.push(pr.gen);
+          extraUnmatchedExp.push(pr.exp);
+        }
+      }
+      for (const pr of pm.pairs) {
+        if (pr.diff < rmseThreshold) {
+          matchedSq += pr.diff * pr.diff; matchedN++;
+        } else {
+          matchedSq += rmseThreshold * rmseThreshold; matchedN++;
+          extraUnmatchedGen.push(pr.gen);
+          extraUnmatchedExp.push(pr.exp);
+        }
+      }
+
+      const rmse       = matchedN > 0 ? Math.sqrt(matchedSq / matchedN) : 9999;
+      const matchRatio = expFeatureCount > 0 ? matchedN / expFeatureCount : 1;
+
+      let unmatchedCount = 0;
+      for (const wl of [...vm.unmatchedGen, ...extraUnmatchedGen,
+                        ...vm.unmatchedExp, ...extraUnmatchedExp,
+                        ...pm.unmatchedGen, ...pm.unmatchedExp]) {
+        if (wl >= 700) unmatchedCount++;
+      }
+
+      const totalCost = matchedN > 0
+        ? rmse + penaltyVal * unmatchedCount + penaltyVal * (1 - matchRatio)
+        : 9999;
+      totalCosts[i] = totalCost;
+      if (matchedN > 0) rmseArr[i] = rmse;
+
+      if (totalCost < bestCost) {
+        bestCost = totalCost;
+        bestIdx = i;
+        bestVM = vm;
+        bestPM = pm;
+      }
+    }
+
+    hideLoading();
+
+    AppState.csv.selectedIdx = bestIdx;
+    document.getElementById('thickness-slider').value = bestIdx;
+    document.getElementById('thickness-num').value = thicknesses[bestIdx];
+    autoReSmooth('gen');
+    runDetection('gen');
+    updatePlots();
+
+    const bestT            = thicknesses[bestIdx];
+    const bestRmse         = rmseArr[bestIdx];
+    const validMatchedDisp = bestVM.pairs.filter(p => p.diff < rmseThreshold).length
+                           + bestPM.pairs.filter(p => p.diff < rmseThreshold).length;
+    setStatus(`Auto-fit: ${bestT.toFixed(1)} nm  |  RMSE = ${isNaN(bestRmse) ? 'N/A' : bestRmse.toFixed(2)} nm  |  valid matched ${validMatchedDisp}/${expFeatureCount}`);
+    _coarseResult = {
+      thicknesses: Array.from(thicknesses),
+      rmseArr:     Array.from(rmseArr),
+    };
+    // Auto-populate fine search range from coarse best
+    const _fsS = document.getElementById('fs-start');
+    const _fsE = document.getElementById('fs-end');
+    if (_fsS) _fsS.value = Math.max(0, +(bestT - 10).toFixed(2));
+    if (_fsE) _fsE.value = +(bestT + 10).toFixed(2);
+    updateFsCountHint();
+    _showAutofitModal(thicknesses, totalCosts, rmseArr, null, bestIdx, bestVM, bestPM, mode, null);
+  }, 30);
+}
+
+function smoothArray(arr, window = 11) {
+  const half = Math.floor(window / 2);
+  return arr.map((_, i) => {
+    const slice = arr
+      .slice(Math.max(0, i - half), Math.min(arr.length, i + half + 1))
+      .filter(v => isFinite(v) && !isNaN(v));
+    return slice.length > 0
+      ? slice.reduce((a, b) => a + b, 0) / slice.length
+      : null;
+  });
+}
+
+function _showAutofitModal(thicknesses, totalCosts, rmseArr, _unused, bestIdx, valleyMatch, peakMatch, mode, coarseOverlay) {
+  const _maxDiff        = parseFloat(document.getElementById('autofit-max-diff').value) || 30;
+  const bestCostT       = thicknesses[bestIdx];
+  const bestRmse        = rmseArr[bestIdx];
+  const nMatched        = valleyMatch.pairs.length + peakMatch.pairs.length;
+  const nUnmatched      = valleyMatch.unmatchedGen.length + valleyMatch.unmatchedExp.length
+                        + peakMatch.unmatchedGen.length   + peakMatch.unmatchedExp.length;
+  const isFine          = coarseOverlay != null;
+  const dec             = isFine ? 2 : 1;
+  const expFeatureCount = ((mode === 'valleys' || mode === 'both') ? AppState.valleys.exp.length : 0)
+                        + ((mode === 'peaks'   || mode === 'both') ? AppState.peaks.exp.length   : 0);
+  const validMatchedN   = valleyMatch.pairs.filter(p => p.diff < _maxDiff).length
+                        + peakMatch.pairs.filter(p => p.diff < _maxDiff).length;
+
+  // Compute pure RMSE minimum for optional secondary reference
+  let bestRmseIdx = 0, bestRmseVal = Infinity;
+  for (let i = 0; i < rmseArr.length; i++) {
+    if (isFinite(rmseArr[i]) && rmseArr[i] < bestRmseVal) { bestRmseVal = rmseArr[i]; bestRmseIdx = i; }
+  }
+  const bestRmseT = thicknesses[bestRmseIdx];
+  const bothSame  = Math.abs(bestCostT - bestRmseT) < 0.5;
+
+  const resultEl = document.getElementById('autofit-result');
+  const matchPctRes = expFeatureCount > 0 ? Math.round(validMatchedN / expFeatureCount * 100) : 0;
+  const rmseStr = isNaN(bestRmse) ? 'N/A' : bestRmse.toFixed(2);
+  resultEl.textContent = isFine
+    ? `Fine Search Best (RMSE min): ${bestCostT.toFixed(dec)} nm  |  RMSE: ${rmseStr} nm  |  Match Rate: ${validMatchedN}/${expFeatureCount} (${matchPctRes}%)  |  Unmatched: ${nUnmatched}`
+    : `Recommended: ${bestCostT.toFixed(dec)} nm  |  RMSE: ${rmseStr} nm  |  Match Rate: ${validMatchedN}/${expFeatureCount} (${matchPctRes}%)  |  Unmatched: ${nUnmatched}`;
+
+  // Helper: render matched/unmatched rows for one match result
+  function pairRows(match) {
+    const _tg      = parseFloat(document.getElementById('vt-thr-green').value)    || 10;
+    const _to      = parseFloat(document.getElementById('vt-thr-orange').value)   || 20;
+    const _maxDiff = parseFloat(document.getElementById('autofit-max-diff').value) || 30;
+    let h = '';
+    match.pairs.forEach((pr, i) => {
+      const cls    = pr.diff <= _tg ? 'dg' : pr.diff <= _to ? 'dw' : 'db';
+      const rowBg  = pr.diff >= _maxDiff ? 'background:#fff3e0;' : '';
+      h += `<tr style="${rowBg}"><td>${i+1}</td><td>${pr.gen.toFixed(1)}</td><td>${pr.exp.toFixed(1)}</td>` +
+           `<td class="${cls}">${pr.diff.toFixed(1)}</td></tr>`;
+    });
+    if (!match.pairs.length)
+      h += `<tr><td colspan="4" style="color:#bbb;font-size:10px;padding:3px 6px;text-align:center;">no matches</td></tr>`;
+    if (match.unmatchedGen.length)
+      h += `<tr><td colspan="4" style="color:#1565c0;font-size:10px;padding:3px 6px;text-align:left;">` +
+           `Gen only: ${match.unmatchedGen.map(v => v.toFixed(1)).join(', ')}</td></tr>`;
+    if (match.unmatchedExp.length)
+      h += `<tr><td colspan="4" style="color:#8B0000;font-size:10px;padding:3px 6px;text-align:left;">` +
+           `Exp only: ${match.unmatchedExp.map(v => v.toFixed(1)).join(', ')}</td></tr>`;
+    return h;
+  }
+
+  // Match Rate header row (N = valid matched, M = total exp features)
+  const matchPct = expFeatureCount > 0 ? Math.round(validMatchedN / expFeatureCount * 100) : 0;
+  let pairsHtml = `<tr><td colspan="4" style="background:#fff8e1;color:#e65100;font-size:11px;font-weight:700;padding:4px 6px;text-align:left;border-bottom:1px solid #ffe082;">` +
+    `Match Rate: ${validMatchedN}/${expFeatureCount} (${matchPct}%)</td></tr>`;
+
+  if (mode === 'valleys' || mode === 'both') {
+    if (mode === 'both')
+      pairsHtml += `<tr><td colspan="4" style="background:#e8eaf6;color:#1f77b4;font-size:10px;font-weight:700;padding:3px 6px;text-align:left;">▾ VALLEYS</td></tr>`;
+    pairsHtml += pairRows(valleyMatch);
+  }
+  if (mode === 'peaks' || mode === 'both') {
+    if (mode === 'both')
+      pairsHtml += `<tr><td colspan="4" style="background:#e8f5e9;color:#2ca02c;font-size:10px;font-weight:700;padding:3px 6px;text-align:left;">▴ PEAKS</td></tr>`;
+    pairsHtml += pairRows(peakMatch);
+  }
+  document.getElementById('autofit-pairs-tbody').innerHTML = pairsHtml;
+
+  // Store data for chart toggle (RMSE ↔ Cost)
+  _autofitChartData = { thicknesses, totalCosts, rmseArr, validMatchedN, bestCostIdx: bestIdx, bestRmseIdx, isFine, coarseOverlay, dec };
+  _autofitShowRmse  = true;
+  const toggleBtn = document.getElementById('autofit-toggle-chart');
+  if (toggleBtn) toggleBtn.textContent = 'Show Cost';
+
+  // Top 3 by minimum totalCost
+  const top3 = Array.from({ length: thicknesses.length }, (_, i) => ({
+    cost: isFinite(totalCosts[i]) ? totalCosts[i] : Infinity,
+    i,
+  }))
+  .filter(x => isFinite(x.cost))
+  .sort((a, b) => a.cost - b.cost)
+  .slice(0, 3);
+
+  const yRmse = Array.from(rmseArr).map(v => isNaN(v) ? null : v);
+
+  const traces = [];
+  // Coarse scan as dotted background reference (only when fine search is primary)
+  if (coarseOverlay) {
+    const yC = coarseOverlay.rmseArr.map(v => isNaN(v) ? null : v);
+    traces.push({
+      x: coarseOverlay.thicknesses, y: yC,
+      type: 'scatter', mode: 'lines', name: 'Coarse scan',
+      line: { color: '#43a047', width: 1.5, dash: 'dot' }, connectgaps: false,
+    });
+  }
+  // Primary curve — smoothed for display when fine search (best-point search uses raw yRmse)
+  const yDisplay = isFine ? smoothArray(yRmse, 11) : yRmse;
+  traces.push({
+    x: Array.from(thicknesses), y: yDisplay,
+    type: 'scatter', mode: 'lines',
+    name: isFine ? 'Fine search (smoothed for display)' : 'RMSE',
+    line: { color: isFine ? '#f57c00' : '#43a047', width: isFine ? 2.5 : 2 },
+    connectgaps: false,
+  });
+
+  const topColors = ['#e65100', '#1565c0', '#6a1b9a'];
+  const topLabels = ['#1', '#2', '#3'];
+  top3.forEach((item, rank) => {
+    const t = thicknesses[item.i];
+    const r = rmseArr[item.i];   // raw RMSE for marker position
+    if (!isNaN(r)) {
+      traces.push({
+        x: [t], y: [r], type: 'scatter', mode: 'markers+text',
+        name: `Top${rank+1}: ${t.toFixed(dec)} nm`,
+        text: [`${topLabels[rank]}: ${t.toFixed(dec)}`],
+        textposition: rank === 0 ? 'top center' : 'bottom center',
+        marker: { color: topColors[rank], size: rank === 0 ? 13 : 9, symbol: 'diamond' },
+        textfont: { size: 10, color: topColors[rank] },
+        showlegend: true,
+      });
+    }
+  });
+
+  // Vertical reference line: recommended thickness (two-phase best)
+  const shapes = [{
+    type: 'line',
+    x0: bestCostT, x1: bestCostT, y0: 0, y1: 1, yref: 'paper',
+    line: { color: '#e65100', width: 1.5, dash: 'dash' },
+  }];
+
+  // Invisible scatter trace for legend entry
+  traces.push({
+    x: [null], y: [null], type: 'scatter', mode: 'lines',
+    name: isFine ? `Fine Best (RMSE min): ${bestCostT.toFixed(dec)} nm` : `Recommended: ${bestCostT.toFixed(dec)} nm`,
+    line: { color: '#e65100', width: 1.5, dash: 'dash' }, showlegend: true,
+  });
+
+  const chartTitle = isFine
+    ? `RMSE vs Thickness — Fine Best: ${bestCostT.toFixed(dec)} nm (RMSE min)`
+    : `RMSE vs Thickness — recommended ${bestCostT.toFixed(dec)} nm`;
+  const layout = {
+    title: { text: chartTitle, font: { size: 13, color: '#333' } },
+    xaxis: { title: 'Thickness (nm)', showgrid: true, gridcolor: '#f0f0f0', zeroline: false },
+    yaxis: { title: 'RMSE (nm)',      showgrid: true, gridcolor: '#f0f0f0', zeroline: false },
+    plot_bgcolor: 'white', paper_bgcolor: 'white',
+    margin: { l: 60, r: 16, t: 44, b: 55 },
+    font: { family: 'Segoe UI, sans-serif', size: 11 },
+    showlegend: true,
+    legend: { x: 1, xanchor: 'right', y: 1, bgcolor: 'rgba(255,255,255,0.85)', font: { size: 10 } },
+    shapes,
+  };
+
+  document.getElementById('autofit-modal').classList.add('show');
+  Plotly.react('autofit-chart', traces, layout,
+    { responsive: true, displayModeBar: false, displaylogo: false });
+}
+
+function closeAutofitModal() {
+  document.getElementById('autofit-modal').classList.remove('show');
+}
+
+function toggleAutofitChart() {
+  if (!_autofitChartData) return;
+  _autofitShowRmse = !_autofitShowRmse;
+
+  const { thicknesses, totalCosts, rmseArr, validMatchedN, bestCostIdx, isFine, coarseOverlay, dec } = _autofitChartData;
+  const btn       = document.getElementById('autofit-toggle-chart');
+  const bestCostT = thicknesses[bestCostIdx];
+  const refShape  = [{ type: 'line', x0: bestCostT, x1: bestCostT, y0: 0, y1: 1, yref: 'paper',
+                       line: { color: '#e65100', width: 1.5, dash: 'dash' } }];
+
+  if (_autofitShowRmse) {
+    btn.textContent = 'Show Cost';
+    const yRmse    = Array.from(rmseArr).map(v => isNaN(v) ? null : v);
+    const yDisplay = isFine ? smoothArray(yRmse, 11) : yRmse;
+    Plotly.react('autofit-chart',
+      [{ x: Array.from(thicknesses), y: yDisplay, type: 'scatter', mode: 'lines',
+         name: isFine ? 'Fine search (smoothed for display)' : 'RMSE',
+         line: { color: isFine ? '#f57c00' : '#43a047', width: isFine ? 2.5 : 2 }, connectgaps: false }],
+      { title: { text: isFine
+          ? `RMSE vs Thickness — Fine Best: ${bestCostT.toFixed(dec)} nm (RMSE min)`
+          : `RMSE vs Thickness — recommended ${bestCostT.toFixed(dec)} nm`,
+          font: { size: 13, color: '#333' } },
+        xaxis: { title: 'Thickness (nm)', showgrid: true, gridcolor: '#f0f0f0', zeroline: false },
+        yaxis: { title: 'RMSE (nm)',      showgrid: true, gridcolor: '#f0f0f0', zeroline: false },
+        plot_bgcolor: 'white', paper_bgcolor: 'white',
+        margin: { l: 60, r: 16, t: 44, b: 55 },
+        font: { family: 'Segoe UI, sans-serif', size: 11 },
+        showlegend: false, shapes: refShape,
+      },
+      { responsive: true, displayModeBar: false, displaylogo: false }
+    );
+  } else {
+    btn.textContent = 'Show RMSE';
+    const yCost        = Array.from(totalCosts).map(v => isFinite(v) ? v : null);
+    const yCostDisplay = isFine ? smoothArray(yCost, 11) : yCost;
+    Plotly.react('autofit-chart',
+      [{ x: Array.from(thicknesses), y: yCostDisplay, type: 'scatter', mode: 'lines',
+         name: isFine ? 'Total Cost (smoothed for display)' : 'Total Cost',
+         line: { color: '#7b1fa2', width: isFine ? 2.5 : 2 }, connectgaps: false }],
+      { title: { text: `Total Cost vs Thickness — recommended ${bestCostT.toFixed(dec)} nm`, font: { size: 13, color: '#333' } },
+        xaxis: { title: 'Thickness (nm)', showgrid: true, gridcolor: '#f0f0f0', zeroline: false },
+        yaxis: { title: 'Total Cost',     showgrid: true, gridcolor: '#f0f0f0', zeroline: false },
+        plot_bgcolor: 'white', paper_bgcolor: 'white',
+        margin: { l: 60, r: 16, t: 44, b: 55 },
+        font: { family: 'Segoe UI, sans-serif', size: 11 },
+        showlegend: false, shapes: refShape,
+      },
+      { responsive: true, displayModeBar: false, displaylogo: false }
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Backend connectivity — ping every 5 s
+// ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
+//  Fine Search — pure JS interpolation (no backend required)
+// ═══════════════════════════════════════════════════════════════
+
+// Linear interpolation of a spectrum at arbitrary thickness
+// using the two neighbouring rows in the loaded CSV.
+function interpolateSpectrum(tTarget) {
+  const { spectra, thicknesses } = AppState.csv;
+  const n = thicknesses.length;
+  if (!n) return null;
+  if (tTarget <= thicknesses[0])   return spectra[0];
+  if (tTarget >= thicknesses[n-1]) return spectra[n-1];
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (thicknesses[m] <= tTarget) lo = m; else hi = m; }
+  const alpha = (tTarget - thicknesses[lo]) / (thicknesses[hi] - thicknesses[lo]);
+  const sLo = spectra[lo], sHi = spectra[hi];
+  return sLo.map((v, i) => v + alpha * (sHi[i] - v));
+}
+
+function updateFsCountHint() {
+  const s  = parseFloat(document.getElementById('fs-start').value);
+  const e  = parseFloat(document.getElementById('fs-end').value);
+  const st = parseFloat(document.getElementById('fs-step').value);
+  const el = document.getElementById('fs-count-hint');
+  if (isNaN(s) || isNaN(e) || isNaN(st) || st <= 0 || e <= s) { el.textContent = '—'; return; }
+  const n = Math.round((e - s) / st) + 1;
+  el.textContent = `Will scan ${n} thickness points`;
+  el.style.color = n > 10000 ? '#c62828' : '#777';
+}
+
+function runFineSearch() {
+  if (!AppState.csv.spectra.length) { setStatus('Fine search: load CSV first'); return; }
+
+  const expValleys = AppState.valleys.exp;
+  const expPeaks   = AppState.peaks.exp;
+  const modeEl     = document.querySelector('input[name="autofit-mode"]:checked');
+  const mode       = modeEl ? modeEl.value : 'valleys';
+
+  if ((mode === 'valleys' || mode === 'both') && !expValleys.length) {
+    setStatus('Fine search: please detect experimental valleys first'); return;
+  }
+  if ((mode === 'peaks' || mode === 'both') && !expPeaks.length) {
+    setStatus('Fine search: please detect peaks in experimental spectrum first'); return;
+  }
+
+  const s  = parseFloat(document.getElementById('fs-start').value);
+  const e  = parseFloat(document.getElementById('fs-end').value);
+  const st = parseFloat(document.getElementById('fs-step').value);
+  if (isNaN(s) || isNaN(e) || isNaN(st) || st <= 0 || e <= s) {
+    setStatus('Fine search: invalid range or step'); return;
+  }
+
+  const n = Math.round((e - s) / st) + 1;
+  if (n > 10000 && !confirm(`Fine search will scan ${n} thickness points. Continue?`)) return;
+
+  showLoading(`Fine search: scanning ${n} thickness points…`);
+
+  setTimeout(() => {
+    const fineTs = [];
+    for (let t = s; t <= e + st * 0.01; t += st) fineTs.push(+t.toFixed(8));
+
+    const wls        = AppState.csv.wavelengths;
+    const p          = AppState.detection.gen;
+    const penaltyVal = parseFloat(document.getElementById('autofit-penalty').value) || 100;
+    const spacing    = (wls[wls.length - 1] - wls[0]) / (wls.length - 1);
+    const distSamps  = Math.max(1, Math.round(p.distanceNm / spacing));
+    const gaps       = AppState.gapMask.intervals;
+    const emptyMatch = { pairs: [], unmatchedGen: [], unmatchedExp: [] };
+
+    const rmseThreshold   = parseFloat(document.getElementById('autofit-max-diff').value) || 30;
+    const expFeatureCount = ((mode === 'valleys' || mode === 'both') ? expValleys.length : 0)
+                          + ((mode === 'peaks'   || mode === 'both') ? expPeaks.length   : 0);
+    const totalCosts      = new Float64Array(fineTs.length).fill(Infinity);
+    const rmseArr         = new Float64Array(fineTs.length).fill(NaN);
+    let bestCost = Infinity, bestCostIdx = 0;
+    let bestRmseVal = Infinity;
+    let bestIdx = 0, bestVM = emptyMatch, bestPM = emptyMatch;
+
+    for (let i = 0; i < fineTs.length; i++) {
+      const spec = interpolateSpectrum(fineTs[i]);
+      if (!spec) continue;
+
+      let genValleys = [], genPeaks = [];
+      if (mode === 'valleys' || mode === 'both') {
+        const rawV = findPeaks(spec.map(v => -v), {
+          height: p.height !== 0 ? -p.height : null, distance: distSamps, prominence: p.prominence,
+        });
+        genValleys = applyGapMask(rawV, wls, gaps).map(k => wls[k]);
+      }
+      if (mode === 'peaks' || mode === 'both') {
+        const rawPk = findPeaks(spec, {
+          height: p.height || null, distance: distSamps, prominence: p.prominence,
+        });
+        genPeaks = applyGapMask(rawPk, wls, gaps).map(k => wls[k]);
+      }
+
+      const vm = (mode === 'valleys' || mode === 'both') ? nearestNeighborMatch(genValleys, expValleys) : emptyMatch;
+      const pm = (mode === 'peaks'   || mode === 'both') ? nearestNeighborMatch(genPeaks,   expPeaks)   : emptyMatch;
+
+      // Threshold: diff >= rmseThreshold → penalize with rmseThreshold² and mark as unmatched
+      let matchedSq = 0, matchedN = 0;
+      const extraUnmatchedGen = [], extraUnmatchedExp = [];
+      for (const pr of vm.pairs) {
+        if (pr.diff < rmseThreshold) {
+          matchedSq += pr.diff * pr.diff; matchedN++;
+        } else {
+          matchedSq += rmseThreshold * rmseThreshold; matchedN++;
+          extraUnmatchedGen.push(pr.gen);
+          extraUnmatchedExp.push(pr.exp);
+        }
+      }
+      for (const pr of pm.pairs) {
+        if (pr.diff < rmseThreshold) {
+          matchedSq += pr.diff * pr.diff; matchedN++;
+        } else {
+          matchedSq += rmseThreshold * rmseThreshold; matchedN++;
+          extraUnmatchedGen.push(pr.gen);
+          extraUnmatchedExp.push(pr.exp);
+        }
+      }
+
+      const rmse       = matchedN > 0 ? Math.sqrt(matchedSq / matchedN) : 9999;
+      const matchRatio = expFeatureCount > 0 ? matchedN / expFeatureCount : 1;
+
+      let unmatchedCount = 0;
+      for (const wl of [...vm.unmatchedGen, ...extraUnmatchedGen,
+                        ...vm.unmatchedExp, ...extraUnmatchedExp,
+                        ...pm.unmatchedGen, ...pm.unmatchedExp]) {
+        if (wl >= 700) unmatchedCount++;
+      }
+
+      const cost = matchedN > 0
+        ? rmse + penaltyVal * unmatchedCount + penaltyVal * (1 - matchRatio)
+        : 9999;
+      totalCosts[i] = cost;
+      if (matchedN > 0) rmseArr[i] = rmse;
+
+      if (cost < bestCost) {
+        bestCost = cost;
+        bestCostIdx = i;
+      }
+      // Fine search recommends RMSE minimum
+      if (matchedN > 0 && rmse < bestRmseVal) {
+        bestRmseVal = rmse;
+        bestIdx = i;
+        bestVM = vm;
+        bestPM = pm;
+      }
+    }
+
+    hideLoading();
+
+    const bestT            = fineTs[bestIdx];
+    const bestRmse         = rmseArr[bestIdx];
+    const validMatchedDisp = bestVM.pairs.filter(p => p.diff < rmseThreshold).length
+                           + bestPM.pairs.filter(p => p.diff < rmseThreshold).length;
+
+    setStatus(`Fine search complete — recommended: ${bestT.toFixed(2)} nm  |  RMSE = ${isNaN(bestRmse) ? 'N/A' : bestRmse.toFixed(2)} nm  |  valid matched ${validMatchedDisp}/${expFeatureCount}`);
+
+    // Jump CSV slider to nearest available thickness
+    const csvTs = AppState.csv.thicknesses;
+    let ni = 0, nd = Infinity;
+    csvTs.forEach((t, i) => { const d = Math.abs(t - bestT); if (d < nd) { nd = d; ni = i; } });
+    AppState.csv.selectedIdx = ni;
+    document.getElementById('thickness-slider').value = ni;
+    document.getElementById('thickness-num').value = csvTs[ni];
+    autoReSmooth('gen');
+    runDetection('gen');
+    updatePlots();
+
+    _showAutofitModal(fineTs, totalCosts, rmseArr, null, bestIdx, bestVM, bestPM, mode, _coarseResult);
+  }, 30);
+}
+
+function onAutofitBackdrop(e) {
+  if (e.target === document.getElementById('autofit-modal')) closeAutofitModal();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Init — empty charts on page load
+// ═══════════════════════════════════════════════════════════════
+window.addEventListener('load', () => {
+  initSgSegments();
+  initGapMask();
+
+  Plotly.newPlot('gen-chart',
+    [],
+    emptyLayout('Generated Spectrum', 'Load CSV to display'),
+    plotConfig()
+  );
+  Plotly.newPlot('exp-chart',
+    [],
+    emptyLayout('Experimental Spectrum', 'Load experiment file to display'),
+    plotConfig()
+  );
+});
+</script>
+</body>
+</html>
