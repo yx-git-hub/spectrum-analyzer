@@ -411,6 +411,19 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     #loading-msg { font-size: 12px; color: #555; }
+    .loading-progress { margin-top: 12px; display: none; }
+    .loading-bar {
+      width: 280px; height: 8px; background: #e8eaf6;
+      border-radius: 4px; overflow: hidden;
+    }
+    #loading-bar-fill {
+      height: 100%; width: 0%; background: #3949ab;
+      transition: width 0.15s linear;
+    }
+    #loading-progress-text {
+      font-size: 11px; color: #777; margin-top: 5px;
+      font-variant-numeric: tabular-nums;
+    }
   </style>
 </head>
 <body>
@@ -420,6 +433,10 @@
   <div class="loading-box">
     <div class="spinner"></div>
     <div id="loading-msg">Loading...</div>
+    <div id="loading-progress" class="loading-progress">
+      <div class="loading-bar"><div id="loading-bar-fill"></div></div>
+      <div id="loading-progress-text"></div>
+    </div>
   </div>
 </div>
 
@@ -433,15 +450,15 @@
 <div id="load-area">
 
   <!-- CSV -->
+  <!-- Dataset selector -->
   <div class="load-section">
-    <div class="load-label">Generated Spectra (CSV)</div>
+    <div class="load-label">Generated Database (Server)</div>
     <div class="load-row">
-      <input type="text" id="csv-path" placeholder="e.g. data/gen_data_single_MoS2_B85_E2000_step0.5.csv" readonly>
-      <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="onCSVFileSelected(event)">
-      <button onclick="document.getElementById('csv-file-input').click()">Browse</button>
-      <button id="csv-load-btn" onclick="loadCSV()" disabled>Load</button>
+      <select id="dataset-select" onchange="onDatasetChange()" style="flex:1;">
+        <option value="">— Loading datasets... —</option>
+      </select>
     </div>
-    <div id="csv-info" class="load-info">No file selected</div>
+    <div id="csv-info" class="load-info">No dataset selected</div>
     <div id="thickness-control">
       <label>Thickness:</label>
       <input type="range" id="thickness-slider" min="0" max="0" value="0"
@@ -790,6 +807,30 @@
  */
 
 // ═══════════════════════════════════════════════════════════════
+//  API Layer — all backend calls go through this object
+// ═══════════════════════════════════════════════════════════════
+const API = {
+  base: 'http://127.0.0.1:8000',
+
+  async _call(method, path, body) {
+    const opts = {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+    };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    const resp = await fetch(this.base + path, opts);
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`API ${method} ${path}: ${resp.status} ${txt}`);
+    }
+    return resp.json();
+  },
+
+  listDatasets()    { return this._call('GET', '/datasets'); },
+  detect(body)      { return this._call('POST', '/api/detect', body); },
+};
+
+// ═══════════════════════════════════════════════════════════════
 //  AppState — single source of truth
 // ═══════════════════════════════════════════════════════════════
 const AppState = {
@@ -843,6 +884,114 @@ let _autofitShowRmse   = true;   // true = RMSE view, false = Cost view
 // ═══════════════════════════════════════════════════════════════
 //  CSV — Generated Spectra
 // ═══════════════════════════════════════════════════════════════
+
+// ─── Dataset loading from server ───
+
+async function initDatasetList() {
+  const sel = document.getElementById('dataset-select');
+  try {
+    setStatus('Connecting to server...');
+    const datasets = await API.listDatasets();
+    if (!datasets.length) {
+      sel.innerHTML = '<option value="">— No datasets on server —</option>';
+      setStatus('No datasets available');
+      return;
+    }
+    sel.innerHTML = '<option value="">— Select a dataset —</option>' +
+      datasets.map(d =>
+        `<option value="${d.id}">${d.name} ` +
+        `(${Math.round(d.wavelengthRange[0])}-${Math.round(d.wavelengthRange[1])} nm, ` +
+        `thickness_step=${d.thicknessStep}nm)</option>`
+      ).join('');
+    setStatus(`Connected — ${datasets.length} dataset(s) available`);
+  } catch (err) {
+    sel.innerHTML = '<option value="">— Server unreachable —</option>';
+    setStatus('Cannot reach backend: ' + err.message);
+  }
+}
+
+async function onDatasetChange() {
+  const id = document.getElementById('dataset-select').value;
+  if (!id) return;
+  showLoading('Loading dataset from server...');
+  showLoadingProgress(0, 'Connecting...');
+  const t0 = performance.now();
+  try {
+    const resp = await fetch(`${API.base}/datasets/${id}/full`);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+    // Stream the response so we can show real download progress.
+    const total  = parseInt(resp.headers.get('Content-Length') || '0', 10);
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      const elapsed = (performance.now() - t0) / 1000;
+      const recMB = (received / 1e6).toFixed(1);
+      if (total > 0) {
+        const pct = Math.min(99.5, (received / total) * 100);
+        const speed = received / Math.max(elapsed, 0.001);
+        const eta = (total - received) / Math.max(speed, 1);
+        const totMB = (total / 1e6).toFixed(1);
+        showLoadingProgress(pct,
+          `${recMB} / ${totMB} MB · ${pct.toFixed(1)}% · ~${eta.toFixed(1)}s left`);
+      } else {
+        showLoadingProgress(0,
+          `Downloaded ${recMB} MB · elapsed ${elapsed.toFixed(1)}s`);
+      }
+    }
+
+    showLoadingProgress(100, 'Parsing JSON...');
+    // Yield to the browser so the 100% bar paints before the blocking parse.
+    await new Promise(r => setTimeout(r, 0));
+    const text = await new Blob(chunks).text();
+    const data = JSON.parse(text);
+
+    AppState.csv.wavelengths = data.wavelengths;
+    AppState.csv.spectra     = data.spectra;
+    AppState.csv.thicknesses = data.thicknesses;
+    AppState.csv.selectedIdx = 0;
+
+    // Thickness slider (reuse original logic)
+    const slider   = document.getElementById('thickness-slider');
+    const numInput = document.getElementById('thickness-num');
+    const ts = data.thicknesses;
+    slider.min   = 0;
+    slider.max   = ts.length - 1;
+    slider.value = 0;
+    const tMin = ts[0];
+    const tMax = ts[ts.length - 1];
+    const step = ts.length > 1 ? +(ts[1] - ts[0]).toFixed(3) : 0.5;
+    numInput.min  = tMin;
+    numInput.max  = tMax;
+    numInput.step = step;
+    numInput.value = tMin;
+    document.getElementById('thickness-hint').textContent =
+      `range ${tMin}–${tMax} nm, step ${step} nm`;
+    document.getElementById('thickness-control').style.display = 'flex';
+    document.getElementById('csv-info').textContent =
+      `Loaded: ${data.spectra.length} spectra × ${data.wavelengths.length} pts  |  t = ${tMin}–${tMax} nm`;
+
+    _coarseResult = null;
+    const _fsMid = ts[Math.floor(ts.length / 2)];
+    const _fsS = document.getElementById('fs-start');
+    const _fsE = document.getElementById('fs-end');
+    if (_fsS) _fsS.value = Math.max(ts[0], +(_fsMid - 50).toFixed(1));
+    if (_fsE) _fsE.value = Math.min(ts[ts.length - 1], +(_fsMid + 50).toFixed(1));
+    if (typeof updateFsCountHint === 'function') updateFsCountHint();
+    updatePlots();
+
+    hideLoading();
+    setStatus(`Dataset loaded: ${id}`);
+  } catch (err) {
+    hideLoading();
+    setStatus('Failed to load dataset: ' + err.message);
+  }
+}
 
 function onCSVFileSelected(e) {
   const file = e.target.files[0];
@@ -1662,8 +1811,19 @@ function showLoading(msg) {
 function setLoadingMsg(msg) {
   document.getElementById('loading-msg').textContent = msg;
 }
+function showLoadingProgress(percent, info) {
+  document.getElementById('loading-progress').style.display = 'block';
+  document.getElementById('loading-bar-fill').style.width = `${percent}%`;
+  document.getElementById('loading-progress-text').textContent = info;
+}
+function hideLoadingProgress() {
+  document.getElementById('loading-progress').style.display = 'none';
+  document.getElementById('loading-bar-fill').style.width = '0%';
+  document.getElementById('loading-progress-text').textContent = '';
+}
 function hideLoading() {
   document.getElementById('loading-overlay').classList.remove('show');
+  hideLoadingProgress();
 }
 function setStatus(msg) {
   document.getElementById('status-text').textContent = msg;
@@ -1949,59 +2109,90 @@ function syncDetectionCheck(which, key, val) {
 //  runDetection — main detection function (called from Detect button)
 // ═══════════════════════════════════════════════════════════════
 
-function runDetection(which) {
-  const dataState = which === 'gen' ? AppState.csv : AppState.excel;
-  const sm        = AppState.smoothing[which];
-  const idx       = dataState.selectedIdx;
-  const rawY      = dataState.spectra[idx];
-  const wls       = dataState.wavelengths;
+async function runDetection(which) {
+  // Experimental side: keep the original local implementation (migrated in stage 3).
+  if (which === 'exp') {
+    const dataState = AppState.excel;
+    const sm        = AppState.smoothing.exp;
+    const idx       = dataState.selectedIdx;
+    const rawY      = dataState.spectra[idx];
+    const wls       = dataState.wavelengths;
 
-  if (!rawY || !wls.length) {
-    setStatus(`No ${which === 'gen' ? 'CSV' : 'experiment'} data loaded`);
+    if (!rawY || !wls.length) {
+      setStatus('No experiment data loaded');
+      return;
+    }
+
+    const y = (sm.cached && sm.cachedIdx === idx) ? sm.cached : rawY;
+    const p = AppState.detection.exp;
+    const spacing   = (wls[wls.length - 1] - wls[0]) / (wls.length - 1);
+    const distSamps = Math.max(1, Math.round(p.distanceNm / spacing));
+    const gaps = AppState.gapMask.intervals;
+
+    const valleys = [];
+    if (p.detectValleys) {
+      const negY = y.map(v => -v);
+      const raw = findPeaks(negY, {
+        height:     p.height !== 0 ? -p.height : null,
+        distance:   distSamps,
+        prominence: p.prominence,
+      });
+      applyGapMask(raw, wls, gaps).forEach(i => valleys.push(wls[i]));
+    }
+    const peaks = [];
+    if (p.detectPeaks) {
+      const raw = findPeaks(y, {
+        height:     p.height || null,
+        distance:   distSamps,
+        prominence: p.prominence,
+      });
+      applyGapMask(raw, wls, gaps).forEach(i => peaks.push(wls[i]));
+    }
+
+    AppState.valleys.exp = valleys;
+    AppState.peaks.exp   = peaks;
+    updatePlots();
+    setStatus(`Experimental: ${valleys.length} valley${valleys.length !== 1 ? 's' : ''}${peaks.length ? `, ${peaks.length} peak${peaks.length !== 1 ? 's' : ''}` : ''} detected`);
     return;
   }
 
-  // Prefer smoothed data; fall back to raw
+  // Generated side: delegate to backend /api/detect.
+  const dataState = AppState.csv;
+  const sm  = AppState.smoothing.gen;
+  const idx = dataState.selectedIdx;
+  const rawY = dataState.spectra[idx];
+  const wls  = dataState.wavelengths;
+
+  if (!rawY || !wls.length) {
+    setStatus('No dataset loaded');
+    return;
+  }
+
   const y = (sm.cached && sm.cachedIdx === idx) ? sm.cached : rawY;
-
-  const p = AppState.detection[which];
-
-  // Convert distance from nm to sample indices
-  const spacing   = (wls[wls.length - 1] - wls[0]) / (wls.length - 1);
-  const distSamps = Math.max(1, Math.round(p.distanceNm / spacing));
-
+  const p = AppState.detection.gen;
   const gaps = AppState.gapMask.intervals;
 
-  // Detect valleys (negate signal, then find peaks)
-  const valleys = [];
-  if (p.detectValleys) {
-    const negY = y.map(v => -v);
-    const raw = findPeaks(negY, {
-      height:     p.height !== 0 ? -p.height : null,
-      distance:   distSamps,
-      prominence: p.prominence,
+  try {
+    const r = await API.detect({
+      y, wavelengths: wls,
+      detection: {
+        prominence:    p.prominence,
+        distanceNm:    p.distanceNm,
+        height:        p.height,
+        detectValleys: p.detectValleys,
+        detectPeaks:   p.detectPeaks,
+      },
+      gaps,
     });
-    applyGapMask(raw, wls, gaps).forEach(i => valleys.push(wls[i]));
+    AppState.valleys.gen = r.valleys;
+    AppState.peaks.gen   = r.peaks;
+    updatePlots();
+    setStatus(`Generated: ${r.valleys.length} valley${r.valleys.length !== 1 ? 's' : ''}` +
+              (r.peaks.length ? `, ${r.peaks.length} peak${r.peaks.length !== 1 ? 's' : ''}` : '') +
+              ` detected`);
+  } catch (err) {
+    setStatus('Detect failed: ' + err.message);
   }
-
-  // Detect peaks (positive direction)
-  const peaks = [];
-  if (p.detectPeaks) {
-    const raw = findPeaks(y, {
-      height:     p.height || null,
-      distance:   distSamps,
-      prominence: p.prominence,
-    });
-    applyGapMask(raw, wls, gaps).forEach(i => peaks.push(wls[i]));
-  }
-
-  AppState.valleys[which] = valleys;
-  AppState.peaks[which]   = peaks;
-
-  updatePlots();
-
-  const label = which === 'gen' ? 'Generated' : 'Experimental';
-  setStatus(`${label}: ${valleys.length} valley${valleys.length !== 1 ? 's' : ''}${peaks.length ? `, ${peaks.length} peak${peaks.length !== 1 ? 's' : ''}` : ''} detected`);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2687,6 +2878,7 @@ function onAutofitBackdrop(e) {
 window.addEventListener('load', () => {
   initSgSegments();
   initGapMask();
+  initDatasetList();
 
   Plotly.newPlot('gen-chart',
     [],
