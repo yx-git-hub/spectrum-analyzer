@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "PowerShell(Get-Content *)",
+      "Bash(python tools/convert_csv_to_npy.py ../gen_data_single_MoS2_B85_E2000_step0.5.csv data/ mos2 --name \"MoS2\" --material \"MoS2\")",
+      "Bash(curl *)",
+      "Bash(git mv *)"
+    ]
+  }
+}
