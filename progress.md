@@ -239,3 +239,49 @@
 **下一步**:用户在 3d (Fine Search) 之前决定 — 接受 11s 性能进 3d,还是先做 numba mini 加速阶段
 
 > 会话结束: 2026-05-14 15:30
+
+### 2026-05-14 - Session 8 — numba JIT 加速 mini 阶段 (Auto-Fit 11.4s → 0.24s, 47x)
+**目标**:在进 3d 前先优化 Auto-Fit 性能。用户选了"做 numba 加速"路线。目标 5-50x 提速,数值必须 bit-identical
+
+**完成情况**:
+- `pip install numba==0.60.0` 到 conda env `test`(顺带装 llvmlite 0.43.0)
+- `requirements.txt` 加 `numba==0.60.0`
+- `backend/app/algorithms/detection.py`:
+  - 加 `@njit(cache=True) _calc_prominences_njit(peak_idxs: int64[], y: float64[]) → float64[]`,纯 numba 实现 JS calcProminences 的左右游走
+  - 加 `@njit(cache=True) _js_find_peaks_njit(y, height, height_is_none, distance, prominence, prominence_is_none) → int64[]`,4 步 JS findPeaks 全部 njit 化(numpy 预分配 buffer 替代 Python list growing)。`*_is_none` flags 携带"无过滤"语义,因 numba 不能直接 dispatch Optional[float]
+  - 公共 API `js_find_peaks(y, *, height=None, distance=1, prominence=None)` 变薄壳:转 contiguous float64 + None→0.0 sentinel,调 njit 内核,返回 Python list (向后兼容 apply_gap_mask 用户)
+  - 加 `warmup_njit()`:用 7 点 dummy 输入跑两次 _js_find_peaks_njit + 一次 _calc_prominences_njit,触发编译
+- `backend/app/algorithms/matching.py`:
+  - 加 `@njit(cache=True) _greedy_match_kernel(gen, exp) → (pair_g_idx, pair_e_idx, pair_diff, used_g, used_e)`
+  - **关键 tie-break**:用 **稳定插入排序** 而非 np.argsort(numba 0.60 不保证 stable),保证 (g 外 e 内) 构造顺序在距离相等时的优先级与 JS Array.sort 一致
+  - 公共 API `nearest_neighbor_match(gen, exp) → dict` 变薄壳:np.asarray + 调内核 + 装回 Python dict/list
+  - 加 `warmup_njit()`
+- `backend/app/main.py`:
+  - lifespan startup 在 load_all 之后调 `detection_mod.warmup_njit()` + `matching_mod.warmup_njit()`
+  - 首次启动 numba 编译 ~3-5s(下盘后写 `__pycache__/*.nbi` cache),后续启动读 cache 仅 ~0.26s
+- 全部 parity 回归(无任何容差松动):
+  - smoothing: 29/29 PASS(SG 未受影响,sanity check)
+  - matching: 127/127 PASS(12 贪心 + 15 DP 固定 + 100 模糊)
+  - autofit: 8/8 PASS(bestIdx/bestThickness/bestRmse/totalCosts[每点]/rmseArr[每点] 与 JS 完全一致,容差 1e-9)
+- 性能基准(同一份 mos2 + 同样参数,3 次试):
+  - **优化前**: 11.4s/次
+  - **优化后**: 0.24s, 0.24s, 0.27s **(~47x)**
+  - 0.24s ≈ Python 网络/序列化开销 + 0.1-0.15s 真实计算,已逼近上限
+
+**文件**:
+- 修改:`backend/app/algorithms/detection.py`、`backend/app/algorithms/matching.py`、`backend/app/main.py`、`backend/requirements.txt`
+- 未碰前端
+
+**正确性保证**:
+- 4 套 parity 测试共 164 个 case 全 PASS
+- 内核纯确定性(无随机/并发/race)
+- 数值 bit-identical(同样的 IEEE 754 运算顺序)
+
+**部署影响**(将来阶段 5):
+- Render 实例首次启动慢 3-5s 编译,后续重启走 cache
+- 内存占用增加 ~50-100 MB(numba+llvmlite)
+- 整套依赖体积 ~30 MB 上行
+
+**下一步**:用户验证通过即提交,然后进阶段 3d(`/api/fine-search`,最后一个端点)
+
+> 会话结束: 2026-05-14 16:30
