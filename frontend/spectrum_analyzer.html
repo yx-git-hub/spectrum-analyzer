@@ -828,6 +828,7 @@ const API = {
 
   listDatasets()    { return this._call('GET', '/datasets'); },
   detect(body)      { return this._call('POST', '/api/detect', body); },
+  smooth(body)      { return this._call('POST', '/api/smooth', body); },
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -2260,7 +2261,7 @@ function removeSgSegment(which, idx) {
 // ═══════════════════════════════════════════════════════════════
 
 // Called by "Apply" button — reads segments from UI and computes smooth
-function applySmoothing(which) {
+async function applySmoothing(which) {
   const dataState = which === 'gen' ? AppState.csv : AppState.excel;
   const sm = AppState.smoothing[which];
   const idx = dataState.selectedIdx;
@@ -2272,14 +2273,27 @@ function applySmoothing(which) {
     return;
   }
 
-  sm.cached = applySegmentedSG(rawY, wls, sm.segments);
-  sm.cachedIdx = idx;
-  updatePlots();
-  setStatus(`${which === 'gen' ? 'Generated' : 'Experimental'} spectrum smoothed (${sm.segments.length} segment${sm.segments.length > 1 ? 's' : ''})`);
+  showLoading('Applying Savitzky-Golay filter...');
+  try {
+    const r = await API.smooth({
+      y: rawY,
+      wavelengths: wls,
+      segments: sm.segments,
+    });
+    sm.cached = r.smoothed;
+    sm.cachedIdx = idx;
+    updatePlots();
+    setStatus(`${which === 'gen' ? 'Generated' : 'Experimental'} spectrum smoothed (${sm.segments.length} segment${sm.segments.length > 1 ? 's' : ''})`);
+  } catch (err) {
+    setStatus('Smoothing failed: ' + err.message);
+  } finally {
+    hideLoading();
+  }
 }
 
-// Re-apply existing smooth params when spectrum index changes (no UI interaction needed)
-function autoReSmooth(which) {
+// Re-apply existing smooth params when spectrum index changes (no UI interaction needed).
+// Called from slider drag — must NOT show loading overlay (would flicker).
+async function autoReSmooth(which) {
   const dataState = which === 'gen' ? AppState.csv : AppState.excel;
   const sm = AppState.smoothing[which];
   if (!sm.cached) return;   // no smooth applied yet — nothing to re-apply
@@ -2287,8 +2301,19 @@ function autoReSmooth(which) {
   const rawY = dataState.spectra[idx];
   const wls  = dataState.wavelengths;
   if (!rawY || !rawY.length) return;
-  sm.cached = applySegmentedSG(rawY, wls, sm.segments);
-  sm.cachedIdx = idx;
+
+  try {
+    const r = await API.smooth({
+      y: rawY,
+      wavelengths: wls,
+      segments: sm.segments,
+    });
+    sm.cached = r.smoothed;
+    sm.cachedIdx = idx;
+    updatePlots();   // re-draw once the smoothed curve arrives (caller already drew with old cache)
+  } catch (err) {
+    console.warn('autoReSmooth failed:', err);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════

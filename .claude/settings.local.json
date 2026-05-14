@@ -7,7 +7,17 @@
       "PowerShell(Get-Content *)",
       "Bash(python tools/convert_csv_to_npy.py ../gen_data_single_MoS2_B85_E2000_step0.5.csv data/ mos2 --name \"MoS2\" --material \"MoS2\")",
       "Bash(curl *)",
-      "Bash(git mv *)"
+      "Bash(git mv *)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :8000)",
+      "Skill(superpowers:verification-before-completion)",
+      "Bash(python tests/test_smoothing_parity.py)",
+      "Bash(python -c \"import numpy as np; d = np.load\\('data/mos2.npy'\\); print\\(type\\(d\\).__name__\\); print\\(list\\(d.files\\) if hasattr\\(d, 'files'\\) else d.shape\\)\")",
+      "Bash(uvicorn app.main:app *)",
+      "Bash(python *)",
+      "Bash(where uvicorn *)",
+      "Bash(D:/anaconda/envs/test/python.exe *)",
+      "Bash(taskkill /F /PID 30716)"
     ]
   }
 }
