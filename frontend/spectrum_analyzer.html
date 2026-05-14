@@ -1449,49 +1449,6 @@ function updateExpChart() {
   Plotly.react('exp-chart', traces, layout, plotConfig());
 }
 
-// Optimal monotone matching via DP — pairs each valley with its closest counterpart.
-// Both arrays must be sorted ascending (wavelengths are always sorted).
-// Returns array of [genWl | null, expWl | null] pairs.
-function matchValleys(gen, exp) {
-  if (!gen.length && !exp.length) return [];
-  if (!gen.length) return exp.map(e => [null, e]);
-  if (!exp.length) return gen.map(g => [g, null]);
-
-  const m = gen.length, n = exp.length;
-  const SKIP = 1e9;   // penalty for leaving a valley unmatched
-
-  // dp[i][j] = min cost after processing gen[0..i-1] and exp[0..j-1]
-  const dp = Array.from({length: m + 1}, () => new Float64Array(n + 1).fill(Infinity));
-  dp[0][0] = 0;
-  for (let i = 0; i <= m; i++) {
-    for (let j = 0; j <= n; j++) {
-      if (!isFinite(dp[i][j])) continue;
-      if (i < m) dp[i+1][j] = Math.min(dp[i+1][j], dp[i][j] + SKIP);
-      if (j < n) dp[i][j+1] = Math.min(dp[i][j+1], dp[i][j] + SKIP);
-      if (i < m && j < n)
-        dp[i+1][j+1] = Math.min(dp[i+1][j+1], dp[i][j] + Math.abs(gen[i] - exp[j]));
-    }
-  }
-
-  // Backtrack to recover the actual pairing
-  const pairs = [];
-  let i = m, j = n;
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 &&
-        dp[i][j] === dp[i-1][j-1] + Math.abs(gen[i-1] - exp[j-1])) {
-      pairs.unshift([gen[i-1], exp[j-1]]);
-      i--; j--;
-    } else if (i > 0 && dp[i][j] === dp[i-1][j] + SKIP) {
-      pairs.unshift([gen[i-1], null]);
-      i--;
-    } else {
-      pairs.unshift([null, exp[j-1]]);
-      j--;
-    }
-  }
-  return pairs;
-}
-
 async function updateValleyTable() {
   const genV = AppState.valleys.gen, expV = AppState.valleys.exp;
   const genP = AppState.peaks.gen,   expP = AppState.peaks.exp;
@@ -1855,163 +1812,6 @@ function setStatusRight(msg) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  Matrix utilities (for SG polynomial least squares)
-// ═══════════════════════════════════════════════════════════════
-
-function matMul(A, B) {
-  const r = A.length, c = B[0].length, k = B.length;
-  return Array.from({length: r}, (_, i) =>
-    Array.from({length: c}, (_, j) =>
-      Array.from({length: k}, (_, m) => A[i][m] * B[m][j]).reduce((a, b) => a + b, 0)
-    )
-  );
-}
-
-function matTranspose(A) {
-  return A[0].map((_, j) => A.map(r => r[j]));
-}
-
-// Gauss-Jordan elimination matrix inversion (works for up to ~8×8)
-function matInv(M) {
-  const n = M.length;
-  const aug = M.map((row, i) => {
-    const id = Array(n).fill(0); id[i] = 1;
-    return [...row, ...id];
-  });
-  for (let col = 0; col < n; col++) {
-    let maxRow = col;
-    for (let row = col + 1; row < n; row++)
-      if (Math.abs(aug[row][col]) > Math.abs(aug[maxRow][col])) maxRow = row;
-    [aug[col], aug[maxRow]] = [aug[maxRow], aug[col]];
-    const pivot = aug[col][col];
-    if (Math.abs(pivot) < 1e-12) throw new Error('Singular matrix in SG computation');
-    for (let j = 0; j < 2 * n; j++) aug[col][j] /= pivot;
-    for (let row = 0; row < n; row++) {
-      if (row === col) continue;
-      const f = aug[row][col];
-      for (let j = 0; j < 2 * n; j++) aug[row][j] -= f * aug[col][j];
-    }
-  }
-  return aug.map(row => row.slice(n));
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  Polynomial fit / eval (for SG edge handling)
-// ═══════════════════════════════════════════════════════════════
-
-// Least-squares polynomial fit to paired (xs, ys), returns coefficients [c0..cp]
-function polyFit(xs, ys, p) {
-  const A = xs.map(xi => Array.from({length: p + 1}, (_, j) => Math.pow(xi, j)));
-  const AT = matTranspose(A);
-  const ATA = matMul(AT, A);
-  const ATy = AT.map(row => row.reduce((s, v, i) => s + v * ys[i], 0));
-  const inv = matInv(ATA);
-  return inv.map(row => row.reduce((s, v, i) => s + v * ATy[i], 0));
-}
-
-function polyEval(coeffs, x) {
-  return coeffs.reduce((s, c, i) => s + c * Math.pow(x, i), 0);
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  Savitzky-Golay filter
-//  Equivalent to scipy.signal.savgol_filter(y, window_length, polyorder)
-// ═══════════════════════════════════════════════════════════════
-
-// Cache kernels keyed by "w,p" to avoid recomputation
-const _sgCache = new Map();
-
-// Compute convolution kernel for interior points
-function _computeSgKernel(w, p) {
-  const hw = Math.floor(w / 2);
-  const x = Array.from({length: w}, (_, i) => i - hw);
-  // Design matrix: rows = window positions, cols = poly powers
-  const A = x.map(xi => Array.from({length: p + 1}, (_, j) => Math.pow(xi, j)));
-  const AT = matTranspose(A);
-  const ATA = matMul(AT, A);
-  const ATAinv = matInv(ATA);
-  const P = matMul(ATAinv, AT);  // (p+1) x w  — pseudo-inverse of A
-  // Kernel = A[hw] @ P  (the hat matrix row at center)
-  const Ahw = A[hw];
-  return P[0].map((_, j) => Ahw.reduce((s, v, k) => s + v * P[k][j], 0));
-}
-
-function sgKernel(w, p) {
-  const key = `${w},${p}`;
-  if (!_sgCache.has(key)) _sgCache.set(key, _computeSgKernel(w, p));
-  return _sgCache.get(key);
-}
-
-// Apply SG filter to 1-D array y
-function savgolFilter(y, windowLen, polyOrder) {
-  const n = y.length;
-  // Sanitise inputs
-  if (windowLen > n) windowLen = n % 2 === 0 ? n - 1 : n;
-  if (windowLen % 2 === 0) windowLen--;
-  if (windowLen < 3) windowLen = 3;
-  polyOrder = Math.min(polyOrder, windowLen - 1);
-
-  const hw = Math.floor(windowLen / 2);
-  const kernel = sgKernel(windowLen, polyOrder);
-  const result = new Array(n);
-
-  // Interior points: direct convolution
-  for (let i = hw; i < n - hw; i++) {
-    let s = 0;
-    for (let k = 0; k < windowLen; k++) s += kernel[k] * y[i - hw + k];
-    result[i] = s;
-  }
-
-  // x-axis for polynomial fitting (centred at 0)
-  const xFit = Array.from({length: windowLen}, (_, i) => i - hw);
-
-  // Left edge: fit polynomial on first windowLen points, evaluate at edge positions
-  const lCoeffs = polyFit(xFit, Array.from(y.slice(0, windowLen)), polyOrder);
-  for (let i = 0; i < hw; i++) result[i] = polyEval(lCoeffs, i - hw);
-
-  // Right edge: fit polynomial on last windowLen points
-  const rCoeffs = polyFit(xFit, Array.from(y.slice(n - windowLen)), polyOrder);
-  for (let i = n - hw; i < n; i++) result[i] = polyEval(rCoeffs, i - (n - 1 - hw));
-
-  return result;
-}
-
-// Apply segmented SG: each segment may override window/poly for a wavelength range
-// Falls back to default (window=51, poly=3) for uncovered regions
-function applySegmentedSG(y, wavelengths, segments) {
-  const n = y.length;
-  const DEFAULT_W = 51, DEFAULT_P = 3;
-
-  // Build per-index window/poly arrays
-  const W = new Uint16Array(n).fill(DEFAULT_W);
-  const P = new Uint8Array(n).fill(DEFAULT_P);
-
-  for (const seg of segments) {
-    const lo = seg.wlMin != null ? seg.wlMin : -Infinity;
-    const hi = seg.wlMax != null ? seg.wlMax : Infinity;
-    const w = seg.window || DEFAULT_W;
-    const p = seg.poly  || DEFAULT_P;
-    for (let i = 0; i < n; i++) {
-      if (wavelengths[i] >= lo && wavelengths[i] <= hi) { W[i] = w; P[i] = p; }
-    }
-  }
-
-  // Group consecutive indices with the same params, apply SG per group
-  const result = new Array(n);
-  let i = 0;
-  while (i < n) {
-    const w = W[i], p = P[i];
-    let j = i + 1;
-    while (j < n && W[j] === w && P[j] === p) j++;
-    const chunk = Array.from(y.slice(i, j));
-    const sm = savgolFilter(chunk, w, p);
-    for (let k = 0; k < sm.length; k++) result[i + k] = sm[k];
-    i = j;
-  }
-  return result;
-}
-
-// ═══════════════════════════════════════════════════════════════
 //  find_peaks — equivalent to scipy.signal.find_peaks
 // ═══════════════════════════════════════════════════════════════
 
@@ -2341,34 +2141,6 @@ async function autoReSmooth(which) {
 //  Auto-Fit Thickness — nearest-neighbour matching + penalty
 // ═══════════════════════════════════════════════════════════════
 
-// Greedy nearest-neighbour match: sort all pairs by distance, pick greedily.
-// Each valley (gen or exp) is used at most once.
-function nearestNeighborMatch(genValleys, expValleys) {
-  if (!genValleys.length || !expValleys.length) {
-    return { pairs: [], unmatchedGen: [...genValleys], unmatchedExp: [...expValleys] };
-  }
-  const candidates = [];
-  for (let g = 0; g < genValleys.length; g++) {
-    for (let e = 0; e < expValleys.length; e++) {
-      candidates.push({ g, e, dist: Math.abs(genValleys[g] - expValleys[e]) });
-    }
-  }
-  candidates.sort((a, b) => a.dist - b.dist);
-
-  const usedG = new Set(), usedE = new Set();
-  const pairs = [];
-  for (const c of candidates) {
-    if (!usedG.has(c.g) && !usedE.has(c.e)) {
-      pairs.push({ gen: genValleys[c.g], exp: expValleys[c.e], diff: c.dist });
-      usedG.add(c.g);
-      usedE.add(c.e);
-    }
-  }
-  const unmatchedGen = genValleys.filter((_, i) => !usedG.has(i));
-  const unmatchedExp = expValleys.filter((_, i) => !usedE.has(i));
-  return { pairs, unmatchedGen, unmatchedExp };
-}
-
 async function autoFitThickness() {
   const { thicknesses, datasetId } = AppState.csv;
 
@@ -2686,29 +2458,6 @@ function toggleAutofitChart() {
       { responsive: true, displayModeBar: false, displaylogo: false }
     );
   }
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  Backend connectivity — ping every 5 s
-// ═══════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════
-//  Fine Search — pure JS interpolation (no backend required)
-// ═══════════════════════════════════════════════════════════════
-
-// Linear interpolation of a spectrum at arbitrary thickness
-// using the two neighbouring rows in the loaded CSV.
-function interpolateSpectrum(tTarget) {
-  const { spectra, thicknesses } = AppState.csv;
-  const n = thicknesses.length;
-  if (!n) return null;
-  if (tTarget <= thicknesses[0])   return spectra[0];
-  if (tTarget >= thicknesses[n-1]) return spectra[n-1];
-  let lo = 0, hi = n - 1;
-  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (thicknesses[m] <= tTarget) lo = m; else hi = m; }
-  const alpha = (tTarget - thicknesses[lo]) / (thicknesses[hi] - thicknesses[lo]);
-  const sLo = spectra[lo], sHi = spectra[hi];
-  return sLo.map((v, i) => v + alpha * (sHi[i] - v));
 }
 
 function updateFsCountHint() {

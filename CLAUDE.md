@@ -187,7 +187,7 @@ spectrum/
 - [x] 阶段 3b：/api/match
 - [x] 阶段 3c：/api/auto-fit
 - [x] 阶段 3d：/api/fine-search
-- [ ] 阶段 4：前端清理
+- [x] 阶段 4：前端清理
 - [ ] 阶段 5：部署
 - [ ] 阶段 6：安全加固
 
