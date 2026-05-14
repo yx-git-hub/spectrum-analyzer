@@ -829,6 +829,7 @@ const API = {
   listDatasets()    { return this._call('GET', '/datasets'); },
   detect(body)      { return this._call('POST', '/api/detect', body); },
   smooth(body)      { return this._call('POST', '/api/smooth', body); },
+  match(body)       { return this._call('POST', '/api/match', body); },
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1485,7 +1486,7 @@ function matchValleys(gen, exp) {
   return pairs;
 }
 
-function updateValleyTable() {
+async function updateValleyTable() {
   const genV = AppState.valleys.gen, expV = AppState.valleys.exp;
   const genP = AppState.peaks.gen,   expP = AppState.peaks.exp;
   const tbody   = document.getElementById('valley-tbody');
@@ -1504,8 +1505,22 @@ function updateValleyTable() {
   const thrOrange = parseFloat(document.getElementById('vt-thr-orange').value) || 20;
 
   // Compute pairs once — reused for both stats and table rows
-  const valleyPairs = hasValleys ? matchValleys(genV, expV) : [];
-  const peakPairs   = hasPeaks   ? matchValleys(genP, expP) : [];
+  let valleyPairs = [], peakPairs = [];
+  try {
+    if (hasValleys) {
+      const r = await API.match({ gen: genV, exp: expV, algorithm: 'dp' });
+      valleyPairs = r.pairs;
+    }
+    if (hasPeaks) {
+      const r = await API.match({ gen: genP, exp: expP, algorithm: 'dp' });
+      peakPairs = r.pairs;
+    }
+  } catch (err) {
+    console.warn('Match failed:', err);
+    tbody.innerHTML = `<tr><td colspan="4" style="color:#c00;padding:14px;text-align:center;font-size:11px;">Match failed: ${err.message}</td></tr>`;
+    statsEl.style.display = 'none';
+    return;
+  }
 
   // ── Summary stats ──────────────────────────────────────
   const vDiffs   = valleyPairs.filter(([g,e]) => g!=null && e!=null).map(([g,e]) => Math.abs(g-e));

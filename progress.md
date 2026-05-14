@@ -148,3 +148,37 @@
 3. 进入阶段 3b(`/api/match`)
 
 > 会话结束: 2026-05-14 14:15
+
+### 2026-05-14 - Session 6 — 阶段 3b 完成 (/api/match + 前端 updateValleyTable 接入)
+**目标**:把贪心(`nearestNeighborMatch`)和 DP(`matchValleys`)两个匹配算法迁后端,新增 `POST /api/match`;前端 `updateValleyTable` 改 async 走 API。3a 视觉确认通过后整体提交 `19132bf`,然后启动 3b
+
+**完成情况**:
+- 步骤 3b.1:用户确认 3a 视觉通过 → 合并提交 Session 4+5 全部改动为 `19132bf`(Stage 3a complete: /api/smooth + Savitzky-Golay migrated to backend)
+- 步骤 3b.2:新建 `backend/app/algorithms/matching.py`:
+  - `nearest_neighbor_match(gen, exp) → {pairs, unmatchedGen, unmatchedExp}` 贪心
+  - `dp_sequence_match(gen, exp, skip_penalty=1e9) → [[g|None, e|None], ...]` DP
+  - 严格按 JS 行 2109 / 1298 同语义实现:候选构造 (g 外 e 内) + 稳定排序保 tie-break 一致;DP 转移和回溯优先级(配对>跳gen>跳exp)对齐
+- 步骤 3b.3:`schemas.py` 加 `MatchRequest` / `GreedyPair` / `GreedyMatchResponse` / `DPMatchResponse`,`extra="forbid"`,`algorithm: Literal["greedy", "dp"]`
+- 步骤 3b.4:`main.py` 加 `POST /api/match` 端点。**不用 response_model**,两种算法返回结构不同
+- 步骤 3b.5:用户 Swagger UI 自测两组 STAGE_3b.md 预设用例,贪心 / DP 均按预期 PASS
+- 数值等价验证(用 `tests/match_reference.js` Node 跑原 JS 作参考):
+  - 12 项贪心固定用例(空输入/对齐/偏移/平局/不同长度/MoS₂-like)
+  - 15 项 DP 固定用例(含 skip 边界)
+  - 100 项模糊(50 个 m,n∈[0,12] 随机 gen/exp 序列 × 2 算法)
+  - **共 127/127 PASS**
+- 步骤 3b.6:`API.match` 加在 API 对象 (第 832 行)
+- 步骤 3b.7:`updateValleyTable` 改 async,两次 `matchValleys` → 两次 `await API.match({..., algorithm:'dp'})`,try-catch 失败时表格显示 "Match failed: …",**渲染代码 1525-1574 一字未改**
+- 步骤 3b.8:扫描 `updateValleyTable` 3 个调用方(2 个 HTML oninput 阈值输入框 + `updatePlots()`),全部 fire-and-forget,跟 3a `autoReSmooth` 同模式
+- 步骤 3b.9-3b.10:用户浏览器实测 → Network 看到 `/api/match` 200 + 表格 Δ 与 ver1.html 完全一致 → 通过
+
+**文件**:
+- 新增:`backend/app/algorithms/matching.py`、`backend/tests/match_reference.js`、`backend/tests/test_matching_parity.py`
+- 修改:`backend/app/schemas.py`(尾部加 4 个 schema + Literal 导入)、`backend/app/main.py`(import + 端点 + docstring)、`frontend/spectrum_analyzer.html`(API.match 一行 + updateValleyTable 改 async)、`CLAUDE.md`(勾 3b)
+
+**留尾**(按 STAGE_3b.md 设计):
+- 前端 `nearestNeighborMatch` JS 函数本体未删 — `autoFitThickness` (3c) 还在用,3c 完成后才删
+- 前端 `matchValleys` JS 函数本体未删 — 已无调用方但保留到 3c/3d 一并清
+
+**下一步**:进阶段 3c — `/api/auto-fit`(核心 IP:贪心扫描 + 代价函数,`unmatched_count_above_700nm` 是领域 know-how)。等用户点头开始
+
+> 会话结束: 2026-05-14 14:55
