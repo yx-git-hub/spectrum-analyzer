@@ -499,7 +499,7 @@
         <label>Spectrum index:</label>
         <button id="excel-idx-prev" onclick="stepExcelIdx(-1)"
                 style="padding:2px 6px;min-width:22px;height:22px;font-size:11px;line-height:1;" disabled>◀</button>
-        <input type="number" class="ectl-num" id="excel-idx" min="0" value="0"
+        <input type="number" class="ectl-num" id="excel-idx" min="1" value="1"
                oninput="onExcelIdxChange(this.value)">
         <button id="excel-idx-next" onclick="stepExcelIdx(1)"
                 style="padding:2px 6px;min-width:22px;height:22px;font-size:11px;line-height:1;" disabled>▶</button>
@@ -831,6 +831,7 @@ const API = {
   smooth(body)      { return this._call('POST', '/api/smooth', body); },
   match(body)       { return this._call('POST', '/api/match', body); },
   autoFit(body)     { return this._call('POST', '/api/auto-fit', body); },
+  fineSearch(body)  { return this._call('POST', '/api/fine-search', body); },
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1206,9 +1207,9 @@ function storeExcelRows(rows, filename) {
   document.getElementById('excel-controls').style.display = 'block';
 
   const idxEl = document.getElementById('excel-idx');
-  idxEl.value = 0;
-  idxEl.max = n - 1;
-  document.getElementById('excel-idx-hint').textContent = `/ ${n - 1}`;
+  idxEl.value = 1;
+  idxEl.max = n;
+  document.getElementById('excel-idx-hint').textContent = `/ ${n}`;
   updateExcelIdxButtons();
 
   hideLoading();
@@ -1254,8 +1255,8 @@ function onExcelFormatChange() {
   if (!AppState.excel._rawRows) return;
   parseExcelByFormat();
   const n = AppState.excel.spectra.length;
-  document.getElementById('excel-idx').max = n - 1;
-  document.getElementById('excel-idx-hint').textContent = `/ ${n - 1}`;
+  document.getElementById('excel-idx').max = n;
+  document.getElementById('excel-idx-hint').textContent = `/ ${n}`;
   document.getElementById('excel-info').textContent =
     `Loaded: ${n} spectra × ${AppState.excel.wavelengths.length} pts`;
   updateExcelIdxButtons();
@@ -1263,8 +1264,10 @@ function onExcelFormatChange() {
 }
 
 function onExcelIdxChange(val) {
+  // val is the displayed (1-based) index; internal selectedIdx stays 0-based.
   const n = AppState.excel.spectra.length;
-  const idx = Math.max(0, Math.min(parseInt(val) || 0, n - 1));
+  const display = parseInt(val);
+  const idx = Math.max(0, Math.min((isNaN(display) ? 1 : display) - 1, n - 1));
   AppState.excel.selectedIdx = idx;
   autoReSmooth('exp');
   updatePlots();
@@ -1275,8 +1278,8 @@ function stepExcelIdx(delta) {
   const el = document.getElementById('excel-idx');
   const n = AppState.excel.spectra.length;
   if (!n) return;
-  const cur = parseInt(el.value) || 0;
-  const next = Math.max(0, Math.min(cur + delta, n - 1));
+  const cur = parseInt(el.value) || 1;
+  const next = Math.max(1, Math.min(cur + delta, n));
   el.value = next;
   onExcelIdxChange(next);
 }
@@ -1284,11 +1287,11 @@ function stepExcelIdx(delta) {
 function updateExcelIdxButtons() {
   const el = document.getElementById('excel-idx');
   const n = AppState.excel.spectra.length;
-  const cur = parseInt(el.value) || 0;
+  const cur = parseInt(el.value) || 1;
   const btnPrev = document.getElementById('excel-idx-prev');
   const btnNext = document.getElementById('excel-idx-next');
-  if (btnPrev) btnPrev.disabled = cur <= 0 || !n;
-  if (btnNext) btnNext.disabled = cur >= n - 1 || !n;
+  if (btnPrev) btnPrev.disabled = cur <= 1 || !n;
+  if (btnNext) btnNext.disabled = cur >= n || !n;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2719,8 +2722,9 @@ function updateFsCountHint() {
   el.style.color = n > 10000 ? '#c62828' : '#777';
 }
 
-function runFineSearch() {
-  if (!AppState.csv.spectra.length) { setStatus('Fine search: load CSV first'); return; }
+async function runFineSearch() {
+  const { datasetId } = AppState.csv;
+  if (!datasetId) { setStatus('Fine search: select a dataset first'); return; }
 
   const expValleys = AppState.valleys.exp;
   const expPeaks   = AppState.peaks.exp;
@@ -2744,109 +2748,42 @@ function runFineSearch() {
   const n = Math.round((e - s) / st) + 1;
   if (n > 10000 && !confirm(`Fine search will scan ${n} thickness points. Continue?`)) return;
 
-  showLoading(`Fine search: scanning ${n} thickness points…`);
+  const p             = AppState.detection.gen;
+  const penaltyVal    = parseFloat(document.getElementById('autofit-penalty').value)  || 100;
+  const rmseThreshold = parseFloat(document.getElementById('autofit-max-diff').value) || 30;
+  const gaps          = AppState.gapMask.intervals;
 
-  setTimeout(() => {
-    const fineTs = [];
-    for (let t = s; t <= e + st * 0.01; t += st) fineTs.push(+t.toFixed(8));
+  showLoading(`Fine search on server… scanning ${n} thickness points`);
 
-    const wls        = AppState.csv.wavelengths;
-    const p          = AppState.detection.gen;
-    const penaltyVal = parseFloat(document.getElementById('autofit-penalty').value) || 100;
-    const spacing    = (wls[wls.length - 1] - wls[0]) / (wls.length - 1);
-    const distSamps  = Math.max(1, Math.round(p.distanceNm / spacing));
-    const gaps       = AppState.gapMask.intervals;
-    const emptyMatch = { pairs: [], unmatchedGen: [], unmatchedExp: [] };
-
-    const rmseThreshold   = parseFloat(document.getElementById('autofit-max-diff').value) || 30;
-    const expFeatureCount = ((mode === 'valleys' || mode === 'both') ? expValleys.length : 0)
-                          + ((mode === 'peaks'   || mode === 'both') ? expPeaks.length   : 0);
-    const totalCosts      = new Float64Array(fineTs.length).fill(Infinity);
-    const rmseArr         = new Float64Array(fineTs.length).fill(NaN);
-    let bestCost = Infinity, bestCostIdx = 0;
-    let bestRmseVal = Infinity;
-    let bestIdx = 0, bestVM = emptyMatch, bestPM = emptyMatch;
-
-    for (let i = 0; i < fineTs.length; i++) {
-      const spec = interpolateSpectrum(fineTs[i]);
-      if (!spec) continue;
-
-      let genValleys = [], genPeaks = [];
-      if (mode === 'valleys' || mode === 'both') {
-        const rawV = findPeaks(spec.map(v => -v), {
-          height: p.height !== 0 ? -p.height : null, distance: distSamps, prominence: p.prominence,
-        });
-        genValleys = applyGapMask(rawV, wls, gaps).map(k => wls[k]);
-      }
-      if (mode === 'peaks' || mode === 'both') {
-        const rawPk = findPeaks(spec, {
-          height: p.height || null, distance: distSamps, prominence: p.prominence,
-        });
-        genPeaks = applyGapMask(rawPk, wls, gaps).map(k => wls[k]);
-      }
-
-      const vm = (mode === 'valleys' || mode === 'both') ? nearestNeighborMatch(genValleys, expValleys) : emptyMatch;
-      const pm = (mode === 'peaks'   || mode === 'both') ? nearestNeighborMatch(genPeaks,   expPeaks)   : emptyMatch;
-
-      // Threshold: diff >= rmseThreshold → penalize with rmseThreshold² and mark as unmatched
-      let matchedSq = 0, matchedN = 0;
-      const extraUnmatchedGen = [], extraUnmatchedExp = [];
-      for (const pr of vm.pairs) {
-        if (pr.diff < rmseThreshold) {
-          matchedSq += pr.diff * pr.diff; matchedN++;
-        } else {
-          matchedSq += rmseThreshold * rmseThreshold; matchedN++;
-          extraUnmatchedGen.push(pr.gen);
-          extraUnmatchedExp.push(pr.exp);
-        }
-      }
-      for (const pr of pm.pairs) {
-        if (pr.diff < rmseThreshold) {
-          matchedSq += pr.diff * pr.diff; matchedN++;
-        } else {
-          matchedSq += rmseThreshold * rmseThreshold; matchedN++;
-          extraUnmatchedGen.push(pr.gen);
-          extraUnmatchedExp.push(pr.exp);
-        }
-      }
-
-      const rmse       = matchedN > 0 ? Math.sqrt(matchedSq / matchedN) : 9999;
-      const matchRatio = expFeatureCount > 0 ? matchedN / expFeatureCount : 1;
-
-      let unmatchedCount = 0;
-      for (const wl of [...vm.unmatchedGen, ...extraUnmatchedGen,
-                        ...vm.unmatchedExp, ...extraUnmatchedExp,
-                        ...pm.unmatchedGen, ...pm.unmatchedExp]) {
-        if (wl >= 700) unmatchedCount++;
-      }
-
-      const cost = matchedN > 0
-        ? rmse + penaltyVal * unmatchedCount + penaltyVal * (1 - matchRatio)
-        : 9999;
-      totalCosts[i] = cost;
-      if (matchedN > 0) rmseArr[i] = rmse;
-
-      if (cost < bestCost) {
-        bestCost = cost;
-        bestCostIdx = i;
-      }
-      // Fine search recommends RMSE minimum
-      if (matchedN > 0 && rmse < bestRmseVal) {
-        bestRmseVal = rmse;
-        bestIdx = i;
-        bestVM = vm;
-        bestPM = pm;
-      }
-    }
+  try {
+    const r = await API.fineSearch({
+      datasetId,
+      fineStart: s,
+      fineEnd:   e,
+      fineStep:  st,
+      expValleys,
+      expPeaks,
+      mode,
+      penalty: penaltyVal,
+      rmseThreshold,
+      detection: {
+        prominence:    p.prominence,
+        distanceNm:    p.distanceNm,
+        height:        p.height,
+        detectValleys: p.detectValleys,
+        detectPeaks:   p.detectPeaks,
+      },
+      gaps,
+    });
 
     hideLoading();
 
-    const bestT            = fineTs[bestIdx];
-    const bestRmse         = rmseArr[bestIdx];
-    const validMatchedDisp = bestVM.pairs.filter(p => p.diff < rmseThreshold).length
-                           + bestPM.pairs.filter(p => p.diff < rmseThreshold).length;
+    const bestT            = r.bestThickness;
+    const validMatchedDisp = r.bestValleyMatch.pairs.filter(p => p.diff < rmseThreshold).length
+                           + r.bestPeakMatch.pairs.filter(p => p.diff < rmseThreshold).length;
+    const bestRmseDisp     = r.bestRmse == null ? 'N/A' : r.bestRmse.toFixed(2);
 
-    setStatus(`Fine search complete — recommended: ${bestT.toFixed(2)} nm  |  RMSE = ${isNaN(bestRmse) ? 'N/A' : bestRmse.toFixed(2)} nm  |  valid matched ${validMatchedDisp}/${expFeatureCount}`);
+    setStatus(`Fine search complete — recommended: ${bestT.toFixed(2)} nm  |  RMSE = ${bestRmseDisp} nm  |  valid matched ${validMatchedDisp}/${r.expFeatureCount}`);
 
     // Jump CSV slider to nearest available thickness
     const csvTs = AppState.csv.thicknesses;
@@ -2856,11 +2793,26 @@ function runFineSearch() {
     document.getElementById('thickness-slider').value = ni;
     document.getElementById('thickness-num').value = csvTs[ni];
     autoReSmooth('gen');
-    runDetection('gen');
+    await runDetection('gen');
     updatePlots();
 
-    _showAutofitModal(fineTs, totalCosts, rmseArr, null, bestIdx, bestVM, bestPM, mode, _coarseResult);
-  }, 30);
+    // Backend uses null where matched_n was 0; modal expects NaN.
+    const rmseArrNaN = r.rmseArr.map(v => v == null ? NaN : v);
+    _showAutofitModal(
+      r.fineTs,
+      r.totalCosts,
+      rmseArrNaN,
+      null,
+      r.bestIdx,
+      r.bestValleyMatch,
+      r.bestPeakMatch,
+      r.mode,
+      _coarseResult,
+    );
+  } catch (err) {
+    hideLoading();
+    setStatus('Fine search failed: ' + err.message);
+  }
 }
 
 function onAutofitBackdrop(e) {
