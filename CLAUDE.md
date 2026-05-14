@@ -185,7 +185,7 @@ spectrum/
 - [x] 阶段 2：前端连上后端
 - [x] 阶段 3a：/api/smooth
 - [x] 阶段 3b：/api/match
-- [ ] 阶段 3c：/api/auto-fit
+- [x] 阶段 3c：/api/auto-fit
 - [ ] 阶段 3d：/api/fine-search
 - [ ] 阶段 4：前端清理
 - [ ] 阶段 5：部署

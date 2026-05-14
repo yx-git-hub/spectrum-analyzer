@@ -182,3 +182,60 @@
 **下一步**:进阶段 3c — `/api/auto-fit`(核心 IP:贪心扫描 + 代价函数,`unmatched_count_above_700nm` 是领域 know-how)。等用户点头开始
 
 > 会话结束: 2026-05-14 14:55
+
+### 2026-05-14 - Session 7 — 阶段 3c 完成 (/api/auto-fit + 前端 autoFitThickness 接入,核心 IP 全后端化)
+**目标**:把 Auto-Fit 厚度粗扫(扫描循环 + 代价函数 + wl≥700 领域 know-how)从前端 JS 全部迁后端;前端 `autoFitThickness` 改 async 调 `/api/auto-fit`,请求 body 不含 spectra 只含 datasetId,实现真正 IP 保护
+
+**完成情况**:
+- 步骤 3c.1:3b 通过 → 合并提交 `a456f60` (Stage 3b complete: /api/match)
+- 步骤 3c.2:新建 `backend/app/algorithms/fitting.py`
+  - `_detect_one_spectrum(spectrum, wavelengths, ...) → (valleys_wl, peaks_wl)`:per-spectrum detect (复用 js_find_peaks + apply_gap_mask)
+  - `compute_cost_for_match(vm, pm, rmse_threshold, penalty, exp_feature_count) → (total_cost, rmse, matched_n)`:严格对齐 JS 行 2202-2236,**单对共享 extra_unmatched_***、`diff>=threshold` 时 `rmseThreshold²` 计入平方和 + extras、wl≥700 才计入 unmatched 惩罚
+  - `auto_fit_thickness(...)`:扫描循环,对齐 JS 行 2169-2246,`bestIdx = argmin totalCost`(非 argmin rmse)
+- **关键发现 + 修复**:第一次 parity 跑 8 个用例 6 个 FAIL,`distanceNm=20` 时 bestIdx 都不一致(py=66 vs js=67)。根因:`scipy.signal.find_peaks` 的 plateau(取中间) + distance suppression(按高度降序)与原 JS findPeaks(plateau 取最右、distance 按索引顺序)不一致 → 在 `detection.py` 加 `js_find_peaks` + `_calc_prominences` 函数(纯 Python 手撕),vectorized 局部极值 + sequential 三步过滤,**detection.py 全面弃用 scipy.signal.find_peaks**,fitting.py 改用同一份 `js_find_peaks`。修完 8 项全 PASS
+- 步骤 3c.3:`schemas.py` 加 `AutoFitRequest`(`datasetId` 字符串 + `expValleys/expPeaks` 列表 + `mode/penalty/rmseThreshold` + 复用 `DetectionParams`/`GapInterval`,`extra="forbid"`)
+- 步骤 3c.4:`main.py` 加 `POST /api/auto-fit`,从 `datasets.get_dataset(datasetId)` 取 spectra,调 `auto_fit_thickness`,返回完整结果字典(不用 response_model 因为结构层次太深)
+- 数值等价测试(`tests/autofit_reference.js` + `tests/test_autofit_parity.py`):
+  - JS reference 把原 findPeaks/calcProminences/applyGapMask/nearestNeighborMatch/autoFitThickness 全链路提出
+  - 数据:真实 mos2.npy 抽样 200 个厚度切片(每隔 19 个) + 真实 wavelengths,exp 特征用 idx=1276 (t=723 nm) 的真实检测结果
+  - 用例:8 项,覆盖 mode=valleys/peaks/both × penalty/threshold 极值 × gap mask × height 阈值 × distanceNm=20
+  - 结果:**全 8 项 PASS**,bestIdx/bestThickness/totalCosts[每点]/rmseArr[每点]/bestValleyMatch.pairs 全部一致,容差 1e-9
+- HTTP smoke test:`POST /api/auto-fit` 全 3830 spectra 扫描 **11.4 秒**(Python 解释器 vs JS V8 JIT 的固有差距,~5x 慢)
+- 步骤 3c.5:用户 Swagger UI 自测通过
+- 步骤 3c.6:`API.autoFit(body)` 加到 API 对象 (line 833)
+- 步骤 3c.7:汇报 `AppState.csv` 字段结构 + 改动点;用户确认后加 `datasetId: null` 字段 (line 845) + 在 `onDatasetChange` 里写入 `AppState.csv.datasetId = id` (line 961)
+- 步骤 3c.8:**重写 `autoFitThickness` 函数体** (line 2369-2456,~140 行 → ~85 行):
+  - 函数变 async
+  - 早期 guard 从 `!spectra.length` 改成 `!datasetId`
+  - `await runDetection('exp')` 拿到 exp 特征
+  - `showLoading` + `await API.autoFit({datasetId, expValleys, expPeaks, mode, penalty, rmseThreshold, detection, gaps})` — **请求 body 不含 spectra**
+  - 收到响应后:更新 selectedIdx/slider/num input,`autoReSmooth('gen')` + `await runDetection('gen')` + `updatePlots()`,设 status bar,设 `_coarseResult`(null→NaN),自动填 fine search 范围,调 `_showAutofitModal`
+  - try-catch 失败时 hideLoading + status 显示错误
+- 步骤 3c.10-3c.11:用户浏览器实测 → Network 看到 `/api/auto-fit` 200 (请求 body 小、响应含完整字段) + 弹窗 + 滑块跳到 bestIdx + bestThickness 与 ver1.html 一致 → **通过**
+
+**核心 IP 保护实现**:
+- 扫描循环、代价函数、wl≥700 这条领域 know-how 现在**只存在于后端 Python**
+- 前端 dump 出来看不到任何核心算法
+- 前端请求 body 只发 `datasetId` 字符串(几 KB),后端用自己内存里的 spectra 计算
+
+**JS-faithful find_peaks 副作用**:
+- detection.py 现在完全用 `js_find_peaks` 替代了 scipy.signal.find_peaks
+- `/api/detect` 行为微调:plateau 处理、distance 抑制顺序与原 JS 严格一致(scipy 在这两点上不同)
+- 对真实平滑光谱影响极小(plateaus 罕见),用户确认接受
+
+**性能现状**(等用户决定是否优化):
+- 3830 spectra 全扫一遍 11.4s (原 JS 在浏览器 ~2s,因为 V8 JIT)
+- 用户 11s 体感可接受,**先暂不引入 numba**,3d 之后再决定是否优化
+
+**文件**:
+- 新增:`backend/app/algorithms/fitting.py`、`backend/tests/autofit_reference.js`、`backend/tests/test_autofit_parity.py`
+- 修改:`backend/app/algorithms/detection.py`(弃 scipy,加 js_find_peaks/_calc_prominences,detect_peaks_and_valleys 改用新实现)、`backend/app/schemas.py`(尾部加 AutoFitRequest)、`backend/app/main.py`(import + 端点 + docstring)、`frontend/spectrum_analyzer.html`(API.autoFit 一行 + AppState.csv.datasetId 字段 + onDatasetChange 一行 + autoFitThickness 整个函数体替换)、`CLAUDE.md`(勾 3c)
+
+**留尾**(按 STAGE_3c.md 设计,4 阶段统一清理):
+- 前端 `findPeaks`/`calcProminences`/`applyGapMask` JS 函数本体未删(被 `runDetection` 死路径引用)
+- 前端 `nearestNeighborMatch` JS 函数本体未删(现已无调用方)
+- 前端 `matchValleys` JS 函数本体未删(3b 留下的)
+
+**下一步**:用户在 3d (Fine Search) 之前决定 — 接受 11s 性能进 3d,还是先做 numba mini 加速阶段
+
+> 会话结束: 2026-05-14 15:30

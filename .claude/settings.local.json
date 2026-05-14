@@ -17,7 +17,10 @@
       "Bash(python *)",
       "Bash(where uvicorn *)",
       "Bash(D:/anaconda/envs/test/python.exe *)",
-      "Bash(taskkill /F /PID 30716)"
+      "Bash(taskkill /F /PID 30716)",
+      "Bash(awk '{print $5}')",
+      "PowerShell(Stop-Process *)",
+      "Bash(node *)"
     ]
   }
 }
