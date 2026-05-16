@@ -1395,6 +1395,22 @@ function storeExcelRows(rows, filename) {
   updatePlots();
 }
 
+// Replace any NaN/Infinity in arr with the previous valid value (or the
+// next valid value if NaNs lead the array). In-place; returns arr.
+function fillInvalidInPlace(arr) {
+  let last = NaN;
+  for (let i = 0; i < arr.length; i++) {
+    if (isFinite(arr[i])) last = arr[i];
+    else arr[i] = last;
+  }
+  let next = NaN;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (isFinite(arr[i])) next = arr[i];
+    else arr[i] = next;
+  }
+  return arr;
+}
+
 function parseExcelByFormat() {
   const rows = AppState.excel._rawRows;
   if (!rows || !rows.length) return;
@@ -1402,26 +1418,40 @@ function parseExcelByFormat() {
   AppState.excel.format = fmt;
 
   if (fmt === 'B') {
-    // Last row = wavelengths (last value excluded), other rows = spectra
+    // Last row = wavelengths (last cell excluded as it is empty/junk),
+    // other rows = spectra (last cell = thickness).
+    // Build a column mask of which wavelength cells are valid, then apply
+    // the same mask to every spectrum row so lengths line up.
     const wlRow = rows[rows.length - 1];
-    const wavelengths = wlRow.slice(0, -1).map(Number).filter(v => !isNaN(v) && v > 0);
+    const wlCandidates = wlRow.slice(0, -1).map(Number);
+    const colMask = wlCandidates.map(v => isFinite(v) && v > 0);
+    const wavelengths = wlCandidates.filter((_, j) => colMask[j]);
+
     const spectra = [], thicknesses = [];
     for (let i = 0; i < rows.length - 1; i++) {
       const row = rows[i];
       const t = parseFloat(row[row.length - 1]);
-      spectra.push(row.slice(0, -1).map(Number));
+      const full = row.slice(0, -1).map(Number);
+      const aligned = full.filter((_, j) => colMask[j]);
+      spectra.push(fillInvalidInPlace(aligned));
       thicknesses.push(isNaN(t) ? null : t);
     }
     AppState.excel.wavelengths = wavelengths;
     AppState.excel.spectra = spectra;
     AppState.excel.thicknesses = thicknesses;
   } else {
-    // Format A: col 0 = wavelengths, remaining cols = spectra
-    const wavelengths = rows.map(r => parseFloat(r[0])).filter(v => !isNaN(v));
+    // Format A: col 0 = wavelengths, remaining cols = spectra.
+    // Build a row mask from valid wavelengths and apply it to each spectrum
+    // column so vectors stay aligned and finite.
+    const wlCandidates = rows.map(r => parseFloat(r[0]));
+    const rowMask = wlCandidates.map(v => isFinite(v));
+    const wavelengths = wlCandidates.filter((_, i) => rowMask[i]);
     const nCols = rows[0] ? rows[0].length : 0;
     const spectra = [];
     for (let c = 1; c < nCols; c++) {
-      spectra.push(rows.map(r => parseFloat(r[c])));
+      const col = rows.map(r => parseFloat(r[c]));
+      const aligned = col.filter((_, i) => rowMask[i]);
+      spectra.push(fillInvalidInPlace(aligned));
     }
     AppState.excel.wavelengths = wavelengths;
     AppState.excel.spectra = spectra;
