@@ -190,6 +190,6 @@ spectrum/
 - [x] 阶段 4：前端清理
 - [x] 阶段 4.5：数据集扩展（MoO3 单材料 + MoS2/MoO3 双材料预留）
 - [x] 阶段 5：部署（Render: spectrum-backend-uhp8.onrender.com / GitHub Pages: yx-git-hub.github.io/spectrum-analyzer）
-- [ ] 阶段 6：安全加固
+- [x] 阶段 6：安全加固（CORS 白名单 + slowapi 15/min 限流于 auto-fit / fine-search / datasets full）
 
 **进入下一阶段前，更新此清单**。
