@@ -817,8 +817,20 @@
 // ═══════════════════════════════════════════════════════════════
 //  API Layer — all backend calls go through this object
 // ═══════════════════════════════════════════════════════════════
+// Auto-detect API base URL:
+//   - Local development (file://, localhost, 127.0.0.1) → local FastAPI
+//   - Production (e.g. GitHub Pages) → Render backend
+//   - URL override via ?api=https://... (handy for debugging prod against
+//     a different backend without editing this file)
+const _isLocalHost = ['localhost', '127.0.0.1', ''].includes(location.hostname);
+const _apiOverride = new URLSearchParams(location.search).get('api');
+const API_BASE_URL = _apiOverride ||
+  (_isLocalHost
+    ? 'http://127.0.0.1:8000'
+    : 'https://REPLACE-WITH-RENDER-URL.onrender.com');
+
 const API = {
-  base: 'http://127.0.0.1:8000',
+  base: API_BASE_URL,
 
   async _call(method, path, body) {
     const opts = {
