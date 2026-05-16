@@ -79,16 +79,16 @@
     .load-info { font-size: 10px; color: #777; font-style: italic; min-height: 14px; }
 
     /* thickness control */
-    #thickness-control {
+    #thickness-control, #thickness-control-b {
       display: none; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap;
     }
-    #thickness-control label { font-size: 11px; color: #444; }
-    #thickness-slider { width: 180px; cursor: pointer; accent-color: #3949ab; }
-    #thickness-num {
+    #thickness-control label, #thickness-control-b label { font-size: 11px; color: #444; }
+    #thickness-slider, #thickness-slider-b { width: 180px; cursor: pointer; accent-color: #3949ab; }
+    #thickness-num, #thickness-num-b {
       width: 66px; padding: 3px 6px; border: 1px solid #ccc;
       border-radius: 3px; font-size: 11px;
     }
-    #thickness-hint { font-size: 10px; color: #777; }
+    #thickness-hint, #thickness-hint-b { font-size: 10px; color: #777; }
 
     /* excel drop zone */
     #excel-drop {
@@ -460,12 +460,20 @@
     </div>
     <div id="csv-info" class="load-info">No dataset selected</div>
     <div id="thickness-control">
-      <label>Thickness:</label>
+      <label id="thickness-label">Thickness:</label>
       <input type="range" id="thickness-slider" min="0" max="0" value="0"
              oninput="onThicknessSlide(this.value)">
       <input type="number" id="thickness-num" step="0.5"
              oninput="onThicknessNumInput(this.value)">
       <span id="thickness-hint" class=""></span>
+    </div>
+    <div id="thickness-control-b">
+      <label id="thickness-label-b">Thickness B:</label>
+      <input type="range" id="thickness-slider-b" min="0" max="0" value="0"
+             oninput="onThicknessSlideB(this.value)">
+      <input type="number" id="thickness-num-b" step="0.5"
+             oninput="onThicknessNumInputB(this.value)">
+      <span id="thickness-hint-b" class=""></span>
     </div>
   </div>
 
@@ -842,9 +850,16 @@ const AppState = {
     file: null,
     wavelengths: [],    // number[]
     spectra: [],        // number[][]  (index = row in CSV, excluding last row)
-    thicknesses: [],    // number[]    (last col of each spectrum row)
+    thicknesses: [],    // single: number[];  double: number[][] (pairs [a,b])
     selectedIdx: 0,
     datasetId: null,    // server-side dataset id (set by onDatasetChange)
+    materialCount: 1,   // 1 = single material, 2 = stack (e.g. MoS2/MoO3)
+    materials: [],      // string[] — material names, length == materialCount
+    uniqueA: [],        // double only: sorted unique values for axis A
+    uniqueB: [],        // double only: sorted unique values for axis B
+    pairToIdx: null,    // double only: Map "a|b" -> row index in spectra
+    selectedAIdx: 0,    // double only: index into uniqueA
+    selectedBIdx: 0,    // double only: index into uniqueB
   },
   excel: {
     file: null,
@@ -903,11 +918,14 @@ async function initDatasetList() {
       return;
     }
     sel.innerHTML = '<option value="">— Select a dataset —</option>' +
-      datasets.map(d =>
-        `<option value="${d.id}">${d.name} ` +
-        `(${Math.round(d.wavelengthRange[0])}-${Math.round(d.wavelengthRange[1])} nm, ` +
-        `thickness_step=${d.thicknessStep}nm)</option>`
-      ).join('');
+      datasets.map(d => {
+        const stepStr = Array.isArray(d.thicknessStep)
+          ? d.thicknessStep.join('/') + 'nm'
+          : d.thicknessStep + 'nm';
+        return `<option value="${d.id}">${d.name} ` +
+          `(${Math.round(d.wavelengthRange[0])}-${Math.round(d.wavelengthRange[1])} nm, ` +
+          `step=${stepStr})</option>`;
+      }).join('');
     setStatus(`Connected — ${datasets.length} dataset(s) available`);
   } catch (err) {
     sel.innerHTML = '<option value="">— Server unreachable —</option>';
@@ -956,38 +974,22 @@ async function onDatasetChange() {
     const text = await new Blob(chunks).text();
     const data = JSON.parse(text);
 
-    AppState.csv.wavelengths = data.wavelengths;
-    AppState.csv.spectra     = data.spectra;
-    AppState.csv.thicknesses = data.thicknesses;
-    AppState.csv.selectedIdx = 0;
-    AppState.csv.datasetId   = id;
+    AppState.csv.wavelengths    = data.wavelengths;
+    AppState.csv.spectra        = data.spectra;
+    AppState.csv.thicknesses    = data.thicknesses;
+    AppState.csv.selectedIdx    = 0;
+    AppState.csv.datasetId      = id;
+    AppState.csv.materialCount  = data.materialCount || 1;
+    AppState.csv.materials      = data.materials || [];
 
-    // Thickness slider (reuse original logic)
-    const slider   = document.getElementById('thickness-slider');
-    const numInput = document.getElementById('thickness-num');
-    const ts = data.thicknesses;
-    slider.min   = 0;
-    slider.max   = ts.length - 1;
-    slider.value = 0;
-    const tMin = ts[0];
-    const tMax = ts[ts.length - 1];
-    const step = ts.length > 1 ? +(ts[1] - ts[0]).toFixed(3) : 0.5;
-    numInput.min  = tMin;
-    numInput.max  = tMax;
-    numInput.step = step;
-    numInput.value = tMin;
-    document.getElementById('thickness-hint').textContent =
-      `range ${tMin}–${tMax} nm, step ${step} nm`;
-    document.getElementById('thickness-control').style.display = 'flex';
-    document.getElementById('csv-info').textContent =
-      `Loaded: ${data.spectra.length} spectra × ${data.wavelengths.length} pts  |  t = ${tMin}–${tMax} nm`;
+    if (AppState.csv.materialCount === 2) {
+      setupDoubleMaterialSliders(data);
+    } else {
+      setupSingleMaterialSlider(data);
+    }
+    updateFitButtonsState();
 
     _coarseResult = null;
-    const _fsMid = ts[Math.floor(ts.length / 2)];
-    const _fsS = document.getElementById('fs-start');
-    const _fsE = document.getElementById('fs-end');
-    if (_fsS) _fsS.value = Math.max(ts[0], +(_fsMid - 50).toFixed(1));
-    if (_fsE) _fsE.value = Math.min(ts[ts.length - 1], +(_fsMid + 50).toFixed(1));
     if (typeof updateFsCountHint === 'function') updateFsCountHint();
     updatePlots();
 
@@ -997,6 +999,117 @@ async function onDatasetChange() {
     hideLoading();
     setStatus('Failed to load dataset: ' + err.message);
   }
+}
+
+// ─── Single-material slider setup ──────────────────────────────
+function setupSingleMaterialSlider(data) {
+  // Reset double-material state
+  AppState.csv.uniqueA = [];
+  AppState.csv.uniqueB = [];
+  AppState.csv.pairToIdx = null;
+  AppState.csv.selectedAIdx = 0;
+  AppState.csv.selectedBIdx = 0;
+  document.getElementById('thickness-control-b').style.display = 'none';
+
+  const slider   = document.getElementById('thickness-slider');
+  const numInput = document.getElementById('thickness-num');
+  const ts = data.thicknesses;
+  slider.min   = 0;
+  slider.max   = ts.length - 1;
+  slider.value = 0;
+  const tMin = ts[0];
+  const tMax = ts[ts.length - 1];
+  const step = ts.length > 1 ? +(ts[1] - ts[0]).toFixed(3) : 0.5;
+  numInput.min  = tMin;
+  numInput.max  = tMax;
+  numInput.step = step;
+  numInput.value = tMin;
+
+  const matLabel = (AppState.csv.materials[0] || 'Thickness');
+  document.getElementById('thickness-label').textContent = `${matLabel} thickness:`;
+  document.getElementById('thickness-hint').textContent =
+    `range ${tMin}–${tMax} nm, step ${step} nm`;
+  document.getElementById('thickness-control').style.display = 'flex';
+  document.getElementById('csv-info').textContent =
+    `Loaded: ${data.spectra.length} spectra × ${data.wavelengths.length} pts  |  t = ${tMin}–${tMax} nm`;
+
+  // Fine-search defaults centred on the loaded thickness range mid-point
+  const _fsMid = ts[Math.floor(ts.length / 2)];
+  const _fsS = document.getElementById('fs-start');
+  const _fsE = document.getElementById('fs-end');
+  if (_fsS) _fsS.value = Math.max(ts[0], +(_fsMid - 50).toFixed(1));
+  if (_fsE) _fsE.value = Math.min(ts[ts.length - 1], +(_fsMid + 50).toFixed(1));
+}
+
+// ─── Double-material slider setup ──────────────────────────────
+function setupDoubleMaterialSliders(data) {
+  // data.thicknesses is number[][] of [a, b] pairs aligned with data.spectra rows.
+  const pairs = data.thicknesses;
+  const aSet = new Set(), bSet = new Set();
+  const pairToIdx = new Map();
+  for (let i = 0; i < pairs.length; i++) {
+    const a = pairs[i][0], b = pairs[i][1];
+    aSet.add(a); bSet.add(b);
+    pairToIdx.set(a + '|' + b, i);
+  }
+  const uniqueA = [...aSet].sort((x, y) => x - y);
+  const uniqueB = [...bSet].sort((x, y) => x - y);
+  AppState.csv.uniqueA      = uniqueA;
+  AppState.csv.uniqueB      = uniqueB;
+  AppState.csv.pairToIdx    = pairToIdx;
+  AppState.csv.selectedAIdx = 0;
+  AppState.csv.selectedBIdx = 0;
+  AppState.csv.selectedIdx  = pairToIdx.get(uniqueA[0] + '|' + uniqueB[0]) || 0;
+
+  const matA = AppState.csv.materials[0] || 'A';
+  const matB = AppState.csv.materials[1] || 'B';
+
+  // Axis A
+  const stepA = uniqueA.length > 1 ? +(uniqueA[1] - uniqueA[0]).toFixed(3) : 1;
+  const sliderA = document.getElementById('thickness-slider');
+  const numA    = document.getElementById('thickness-num');
+  sliderA.min   = 0;
+  sliderA.max   = uniqueA.length - 1;
+  sliderA.value = 0;
+  numA.min  = uniqueA[0];
+  numA.max  = uniqueA[uniqueA.length - 1];
+  numA.step = stepA;
+  numA.value = uniqueA[0];
+  document.getElementById('thickness-label').textContent = `${matA} thickness:`;
+  document.getElementById('thickness-hint').textContent =
+    `range ${uniqueA[0]}–${uniqueA[uniqueA.length-1]} nm, step ${stepA} nm`;
+  document.getElementById('thickness-control').style.display = 'flex';
+
+  // Axis B
+  const stepB = uniqueB.length > 1 ? +(uniqueB[1] - uniqueB[0]).toFixed(3) : 1;
+  const sliderB = document.getElementById('thickness-slider-b');
+  const numB    = document.getElementById('thickness-num-b');
+  sliderB.min   = 0;
+  sliderB.max   = uniqueB.length - 1;
+  sliderB.value = 0;
+  numB.min  = uniqueB[0];
+  numB.max  = uniqueB[uniqueB.length - 1];
+  numB.step = stepB;
+  numB.value = uniqueB[0];
+  document.getElementById('thickness-label-b').textContent = `${matB} thickness:`;
+  document.getElementById('thickness-hint-b').textContent =
+    `range ${uniqueB[0]}–${uniqueB[uniqueB.length-1]} nm, step ${stepB} nm`;
+  document.getElementById('thickness-control-b').style.display = 'flex';
+
+  document.getElementById('csv-info').textContent =
+    `Loaded: ${data.spectra.length} spectra × ${data.wavelengths.length} pts  |  ` +
+    `${matA} ${uniqueA[0]}–${uniqueA[uniqueA.length-1]} nm, ` +
+    `${matB} ${uniqueB[0]}–${uniqueB[uniqueB.length-1]} nm`;
+}
+
+// ─── Enable/disable Auto-Fit and Fine Search based on material count ───
+function updateFitButtonsState() {
+  const disable = (AppState.csv.materialCount || 1) > 1;
+  const tooltip = disable ? 'Double-material fitting coming soon' : '';
+  document.querySelectorAll('.load-section-fit .fit-action-btn, #fs-btn').forEach(btn => {
+    btn.disabled = disable;
+    btn.title = tooltip;
+  });
 }
 
 function onCSVFileSelected(e) {
@@ -1102,9 +1215,14 @@ function parseCSV(text) {
 
 function onThicknessSlide(val) {
   const idx = parseInt(val);
-  AppState.csv.selectedIdx = idx;
-  const t = AppState.csv.thicknesses[idx];
-  document.getElementById('thickness-num').value = t;
+  if (AppState.csv.materialCount === 2) {
+    AppState.csv.selectedAIdx = idx;
+    document.getElementById('thickness-num').value = AppState.csv.uniqueA[idx];
+    resyncDoubleSelectedIdx();
+  } else {
+    AppState.csv.selectedIdx = idx;
+    document.getElementById('thickness-num').value = AppState.csv.thicknesses[idx];
+  }
   autoReSmooth('gen');
   if (AppState.autoRun) runDetection('gen');
   updatePlots();
@@ -1112,18 +1230,66 @@ function onThicknessSlide(val) {
 
 function onThicknessNumInput(val) {
   const target = parseFloat(val);
-  const ts = AppState.csv.thicknesses;
-  if (!ts.length || isNaN(target)) return;
-  let bestIdx = 0, bestDiff = Infinity;
-  for (let i = 0; i < ts.length; i++) {
-    const d = Math.abs(ts[i] - target);
-    if (d < bestDiff) { bestDiff = d; bestIdx = i; }
+  if (isNaN(target)) return;
+
+  if (AppState.csv.materialCount === 2) {
+    const arr = AppState.csv.uniqueA;
+    if (!arr.length) return;
+    const bestIdx = nearestIdx(arr, target);
+    AppState.csv.selectedAIdx = bestIdx;
+    document.getElementById('thickness-slider').value = bestIdx;
+    resyncDoubleSelectedIdx();
+  } else {
+    const ts = AppState.csv.thicknesses;
+    if (!ts.length) return;
+    const bestIdx = nearestIdx(ts, target);
+    AppState.csv.selectedIdx = bestIdx;
+    document.getElementById('thickness-slider').value = bestIdx;
   }
-  AppState.csv.selectedIdx = bestIdx;
-  document.getElementById('thickness-slider').value = bestIdx;
   autoReSmooth('gen');
   if (AppState.autoRun) runDetection('gen');
   updatePlots();
+}
+
+function onThicknessSlideB(val) {
+  const idx = parseInt(val);
+  AppState.csv.selectedBIdx = idx;
+  document.getElementById('thickness-num-b').value = AppState.csv.uniqueB[idx];
+  resyncDoubleSelectedIdx();
+  autoReSmooth('gen');
+  if (AppState.autoRun) runDetection('gen');
+  updatePlots();
+}
+
+function onThicknessNumInputB(val) {
+  const target = parseFloat(val);
+  const arr = AppState.csv.uniqueB;
+  if (!arr.length || isNaN(target)) return;
+  const bestIdx = nearestIdx(arr, target);
+  AppState.csv.selectedBIdx = bestIdx;
+  document.getElementById('thickness-slider-b').value = bestIdx;
+  resyncDoubleSelectedIdx();
+  autoReSmooth('gen');
+  if (AppState.autoRun) runDetection('gen');
+  updatePlots();
+}
+
+// Helpers used by single & double slider handlers.
+function nearestIdx(arr, target) {
+  let bestIdx = 0, bestDiff = Infinity;
+  for (let i = 0; i < arr.length; i++) {
+    const d = Math.abs(arr[i] - target);
+    if (d < bestDiff) { bestDiff = d; bestIdx = i; }
+  }
+  return bestIdx;
+}
+
+function resyncDoubleSelectedIdx() {
+  const { uniqueA, uniqueB, pairToIdx, selectedAIdx, selectedBIdx } = AppState.csv;
+  if (!pairToIdx) return;
+  const a = uniqueA[selectedAIdx], b = uniqueB[selectedBIdx];
+  const idx = pairToIdx.get(a + '|' + b);
+  if (idx !== undefined) AppState.csv.selectedIdx = idx;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1346,7 +1512,7 @@ function applyCustomStep(x, y) {
 }
 
 function updateGenChart() {
-  const { wavelengths, spectra, thicknesses, selectedIdx } = AppState.csv;
+  const { wavelengths, spectra, thicknesses, selectedIdx, materialCount, materials } = AppState.csv;
   const range = getWlRange();
 
   if (!spectra.length) {
@@ -1354,7 +1520,10 @@ function updateGenChart() {
     return;
   }
 
-  const t = thicknesses[selectedIdx];
+  const tRaw = thicknesses[selectedIdx];
+  const tLabel = (materialCount === 2 && Array.isArray(tRaw))
+    ? `${materials[0]}=${tRaw[0].toFixed(1)} nm, ${materials[1]}=${tRaw[1].toFixed(1)} nm`
+    : `t = ${(+tRaw).toFixed(1)} nm`;
   const rawY = spectra[selectedIdx];
   const { x: rx, y: ry } = filterByWlRange(wavelengths, rawY, range);
   const { x, y } = applyCustomStep(rx, ry);
@@ -1389,12 +1558,12 @@ function updateGenChart() {
   if (gP.length) traces.push({ x:[null], y:[null], type:'scatter', mode:'lines',
     name:'··· Peak', line:{color:'#2ca02c', width:1.5, dash:'dot'}, showlegend:true });
   const layout = spectrumLayout(
-    `Generated Spectrum — t = ${t.toFixed(1)} nm${valleyLabelSuffix(gV, gP)}`,
+    `Generated Spectrum — ${tLabel}${valleyLabelSuffix(gV, gP)}`,
     range, shapes, annots
   );
 
   Plotly.react('gen-chart', traces, layout, plotConfig());
-  setStatusRight(`Gen: t = ${t.toFixed(1)} nm`);
+  setStatusRight(`Gen: ${tLabel}`);
 }
 
 function updateExpChart() {

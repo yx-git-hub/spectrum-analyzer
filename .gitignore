@@ -1,0 +1,7 @@
+# Raw source CSVs — too large for GitHub (one file > 100 MB hard limit).
+# The compressed .npy versions under backend/data/ are committed instead.
+origin_data/
+
+# User-local HTML snapshots / backups
+spectrum_analyzer_ver1.html
+spectrum_analyzer_backup.html
