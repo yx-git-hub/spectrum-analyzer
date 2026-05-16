@@ -188,6 +188,7 @@ spectrum/
 - [x] 阶段 3c：/api/auto-fit
 - [x] 阶段 3d：/api/fine-search
 - [x] 阶段 4：前端清理
+- [x] 阶段 4.5：数据集扩展（MoO3 单材料 + MoS2/MoO3 双材料预留）
 - [ ] 阶段 5：部署
 - [ ] 阶段 6：安全加固
 
