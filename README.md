@@ -284,29 +284,3 @@ scipy `find_peaks` 的参数。Gen 和 Exp 两边独立。
 | 弹窗 RMSE 曲线很平没有明显谷 | 实验波谷太少 / 不够准，调检测参数或换实验数据 |
 | 表里 Δ 全是红色 | 检测参数错配或材料选错；先用 Overlay View 目测两条谱 |
 | `429 Too Many Requests` | 触发限流；一分钟内 Auto-Fit / Fine Search 别按超过 15 次 |
-
----
-
-## 9. 工作流：开发与发布（给作者自己）
-
-仓库：https://github.com/yx-git-hub/spectrum-analyzer
-
-```
-本地改代码 → git commit → git push origin master
-                                ↓
-                ┌───────────────┴────────────────┐
-                ↓                                ↓
-        Render 自动重新部署               GitHub Pages 自动重新发布
-        backend ~3-5 分钟                 frontend ~1-2 分钟
-```
-
-- **改前端**：只动 `frontend/spectrum_analyzer.html`，push 完 Ctrl+F5 刷浏览器
-- **改后端**：动 `backend/` 任何文件，等 Render Live 后浏览器再用
-- **加数据集**：跑 `backend/tools/convert_csv_to_npy.py` 生成 `.npy + .json`，
-  commit 进 `backend/data/`，push 后 Render 重启会自动扫到
-- **本地起后端调试**（conda env `test`）：
-  ```
-  cd backend
-  D:\anaconda\envs\test\python.exe -m uvicorn app.main:app --reload --port 8000
-  ```
-- **本地前端测线上后端**：浏览器地址加 `?api=https://spectrum-backend-uhp8.onrender.com`
