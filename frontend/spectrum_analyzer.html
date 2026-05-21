@@ -952,7 +952,7 @@ async function onDatasetChange() {
   showLoadingProgress(0, 'Connecting...');
   const t0 = performance.now();
   try {
-    const resp = await fetch(`${API.base}/datasets/${id}/full`);
+    const resp = await fetch(`${API.base}/datasets/${id}/full-bin`);
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
     // Stream the response so we can show real download progress.
@@ -980,11 +980,44 @@ async function onDatasetChange() {
       }
     }
 
-    showLoadingProgress(100, 'Parsing JSON...');
-    // Yield to the browser so the 100% bar paints before the blocking parse.
+    showLoadingProgress(100, 'Decoding...');
+    // Yield to the browser so the 100% bar paints before the blocking decode.
     await new Promise(r => setTimeout(r, 0));
-    const text = await new Blob(chunks).text();
-    const data = JSON.parse(text);
+
+    // Concatenate chunks into one contiguous Uint8Array.
+    const buf = new Uint8Array(received);
+    {
+      let off = 0;
+      for (const c of chunks) { buf.set(c, off); off += c.length; }
+    }
+    // Binary layout (all little-endian):
+    //   [4 bytes uint32: headerLen]
+    //   [headerLen bytes UTF-8 JSON: id, materialCount, materials,
+    //    polarization, wavelengths, thicknesses, rows, cols]
+    //   [rows * cols * 4 bytes: spectra as float32 C-order]
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const headerLen = dv.getUint32(0, /*littleEndian*/ true);
+    const headerJson = new TextDecoder('utf-8').decode(
+      buf.subarray(4, 4 + headerLen));
+    const header = JSON.parse(headerJson);
+    const rows = header.rows, cols = header.cols;
+    const spectraOffset = buf.byteOffset + 4 + headerLen;
+    // Backend pads the header so spectraOffset is a multiple of 4 (Float32Array ctor requires this).
+    const flat = new Float32Array(buf.buffer, spectraOffset, rows * cols);
+    // Row-of-views array — zero copy, keeps `spectra[i]` working unchanged.
+    const spectra = new Array(rows);
+    for (let i = 0; i < rows; i++) {
+      spectra[i] = flat.subarray(i * cols, (i + 1) * cols);
+    }
+    const data = {
+      id: header.id,
+      materialCount: header.materialCount,
+      materials: header.materials,
+      polarization: header.polarization,
+      wavelengths: header.wavelengths,
+      thicknesses: header.thicknesses,
+      spectra,
+    };
 
     AppState.csv.wavelengths    = data.wavelengths;
     AppState.csv.spectra        = data.spectra;
