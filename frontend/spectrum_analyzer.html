@@ -837,7 +837,15 @@ const API = {
       method,
       headers: { 'Content-Type': 'application/json' },
     };
-    if (body !== undefined) opts.body = JSON.stringify(body);
+    if (body !== undefined) {
+      // Float32Array (and other typed arrays) serialize as {"0":x,"1":y,...}
+      // by default — convert to plain arrays so the backend sees JSON arrays.
+      // Dataset spectrum rows have been Float32Array views since the binary
+      // /full-bin endpoint landed.
+      opts.body = JSON.stringify(body, (_, v) =>
+        (v && ArrayBuffer.isView(v) && !(v instanceof DataView))
+          ? Array.from(v) : v);
+    }
     const resp = await fetch(this.base + path, opts);
     if (!resp.ok) {
       const txt = await resp.text();
