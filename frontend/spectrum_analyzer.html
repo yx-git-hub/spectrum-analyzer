@@ -2445,8 +2445,22 @@ async function autoFitThickness() {
     AppState.csv.selectedIdx = r.bestIdx;
     document.getElementById('thickness-slider').value = r.bestIdx;
     document.getElementById('thickness-num').value    = r.bestThickness;
+
+    // Reuse gen features from the auto-fit response — saves one /api/detect RTT.
+    // Modes other than 'both' return an empty match object for the unused side,
+    // which matches what the matching algorithm actually consumed.
+    const buildGenFeatures = (m) => [
+      ...m.pairs.map(p => p.gen),
+      ...m.unmatchedGen,
+    ].sort((a, b) => a - b);
+    AppState.valleys.gen = (r.mode === 'valleys' || r.mode === 'both')
+      ? buildGenFeatures(r.bestValleyMatch) : [];
+    AppState.peaks.gen = (r.mode === 'peaks' || r.mode === 'both')
+      ? buildGenFeatures(r.bestPeakMatch) : [];
+
+    // Smoothing call (only fires if user has applied smoothing) runs in parallel;
+    // it re-renders when it resolves.
     autoReSmooth('gen');
-    await runDetection('gen');
     updatePlots();
 
     const validMatchedDisp = r.bestValleyMatch.pairs.filter(p => p.diff < rmseThreshold).length
@@ -2573,6 +2587,10 @@ function _showAutofitModal(thicknesses, totalCosts, rmseArr, _unused, bestIdx, v
   const toggleBtn = document.getElementById('autofit-toggle-chart');
   if (toggleBtn) toggleBtn.textContent = 'Show Cost';
 
+  // Show modal now (text + pairs table are ready); defer the expensive chart
+  // render to the next frame so the panel paints before Plotly blocks.
+  document.getElementById('autofit-modal').classList.add('show');
+
   // Top 3 by minimum totalCost
   const top3 = Array.from({ length: thicknesses.length }, (_, i) => ({
     cost: isFinite(totalCosts[i]) ? totalCosts[i] : Infinity,
@@ -2651,9 +2669,10 @@ function _showAutofitModal(thicknesses, totalCosts, rmseArr, _unused, bestIdx, v
     shapes,
   };
 
-  document.getElementById('autofit-modal').classList.add('show');
-  Plotly.react('autofit-chart', traces, layout,
-    { responsive: true, displayModeBar: false, displaylogo: false });
+  requestAnimationFrame(() => {
+    Plotly.react('autofit-chart', traces, layout,
+      { responsive: true, displayModeBar: false, displaylogo: false });
+  });
 }
 
 function closeAutofitModal() {
