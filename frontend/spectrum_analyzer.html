@@ -888,6 +888,7 @@ const AppState = {
     wavelengths: [],
     spectra: [],
     thicknesses: [],    // may contain nulls
+    names: [],          // Format A only: sample name per spectrum (from header row)
     selectedIdx: 0,
   },
   valleys: {
@@ -1480,6 +1481,7 @@ function parseExcelByFormat() {
     AppState.excel.wavelengths = wavelengths;
     AppState.excel.spectra = spectra;
     AppState.excel.thicknesses = thicknesses;
+    AppState.excel.names = [];   // Format B carries thickness, not names
   } else {
     // Format A: col 0 = wavelengths, remaining cols = spectra.
     // Build a row mask from valid wavelengths and apply it to each spectrum
@@ -1488,15 +1490,21 @@ function parseExcelByFormat() {
     const rowMask = wlCandidates.map(v => isFinite(v));
     const wavelengths = wlCandidates.filter((_, i) => rowMask[i]);
     const nCols = rows[0] ? rows[0].length : 0;
-    const spectra = [];
+    // The header row (col0 non-numeric → excluded by rowMask) holds one sample
+    // name per spectrum column. names[c-1] pairs with spectra[c-1]; blanks
+    // fall back to an index label at render time.
+    const headerRow = (rowMask.length && !rowMask[0]) ? rows[0] : null;
+    const spectra = [], names = [];
     for (let c = 1; c < nCols; c++) {
       const col = rows.map(r => parseFloat(r[c]));
       const aligned = col.filter((_, i) => rowMask[i]);
       spectra.push(fillInvalidInPlace(aligned));
+      names.push(headerRow != null ? String(headerRow[c]).trim() : '');
     }
     AppState.excel.wavelengths = wavelengths;
     AppState.excel.spectra = spectra;
     AppState.excel.thicknesses = [];
+    AppState.excel.names = names;
   }
 }
 
@@ -1663,7 +1671,9 @@ function updateExpChart() {
   const rawY = spectra[idx];
   const { x: rx, y: ry } = filterByWlRange(wavelengths, rawY, range);
   const { x, y } = applyCustomStep(rx, ry);
-  const titleSuffix = (t != null) ? ` — t = ${(+t).toFixed(1)} nm` : ` — index ${idx}`;
+  const nm = (AppState.excel.names || [])[idx];
+  const titleSuffix = (t != null) ? ` — t = ${(+t).toFixed(1)} nm`
+                    : nm ? ` — ${nm}` : ` — index ${idx}`;
 
   const traces = [
     { x, y, type: 'scatter', mode: 'lines', name: 'raw',
@@ -1965,7 +1975,8 @@ function renderOverlayChart() {
   const { wavelengths: eWl, spectra: eSpec, thicknesses: eT, selectedIdx: eIdx } = AppState.excel;
   if (eSpec.length) {
     const et = eT[eIdx];
-    const label = et != null ? ` t=${(+et).toFixed(1)} nm` : ` #${eIdx}`;
+    const enm = (AppState.excel.names || [])[eIdx];
+    const label = et != null ? ` t=${(+et).toFixed(1)} nm` : enm ? ` ${enm}` : ` #${eIdx}`;
     const { x, y } = filterByWlRange(eWl, eSpec[eIdx], range);
     traces.push({ x, y, type: 'scatter', mode: 'lines',
       name: `Exp raw${label}`,
