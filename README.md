@@ -51,17 +51,54 @@
 **双材料模式**：选 `MoS2 on MoO3` 时会出现两个滑块；这模式下 Auto-Fit / Fine
 Search 按钮会**置灰**（双材料拟合算法还没实现，目前只能用来看谱图）。
 
-### 2.2 Experimental Spectra (Excel / CSV) — 拖入实验数据
+### 2.2 Experimental Spectra — 实验数据
+
+顶部 `Source:` 单选切换**实验数据来源**：
+
+- **Upload file**（默认）：上传完整实验谱文件。
+- **Manual input**：不上传文件，直接手输你测到的几个波谷/波峰波长。
+
+#### Upload file 模式 — 拖入实验数据
 
 | 控件 | 作用 |
 |---|---|
 | 虚线框 | 拖文件或点击选文件 (`.xlsx` / `.xls` / `.csv`) |
+| `⊡ Normalize (min-max)` 按钮 | 对实验数据做**最大最小归一化**（见下）；再点一下还原 |
 | `Sheet:` 下拉 | 多 sheet 的 Excel 选哪一个（单 sheet 时不显示）|
 | `Format:` 下拉 | 数据布局：<br>• **Format B**：每行一条谱，最后一行是波长（默认）<br>• **Format A**：第 0 列波长，其它列每列一条谱 |
 | `Spectrum index:` 输入框 + ◀ ▶ | 在多条实验谱之间切换 |
 
 实验文件里如果有空单元格或非数字，加载器会**自动对齐到波长行 + 用最近邻值
 填补**，不会因为一个空格就报错。
+
+**Normalize (min-max)**：导入的数据如果没归一化（反射率不在 0–1），点这个按钮把
+**每条谱各自**线性拉到 [0, 1]：`y' = (y − min) / (max − min)`。再点一下还原成原始
+数据。换文件 / 换 sheet / 换 format 会自动复位成未归一化。
+
+> 注意：归一化是单调仿射变换，**不会改变波谷/波峰的位置**，主要影响两件事：①
+> `Prominence` 阈值的过滤效果（阈值是按反射率算的）；② Overlay 叠图时两条谱的视觉
+> 对齐。所以它对"幅度没归一化、想用统一 Prominence 或目视对比"的数据有用。
+
+#### Manual input 模式 — 手输特征反推厚度
+
+没有完整实验谱、只知道某波段（比如可见光 400–900 nm）里几个波峰/波谷的大致位置
+时，直接把波长敲进来就能粗估厚度，并**反过来检验你测的数据是否合理**。
+
+| 控件 | 作用 |
+|---|---|
+| `Valley λ (nm)` | 波谷波长列表，逗号/空格分隔，如 `450, 600, 780` |
+| `Peak λ (nm)` | 波峰波长列表，同上 |
+| `Measured range (nm)` `λmin` / `λmax` | **可选**测量范围。填了就把这个区间**外**的生成谱特征排除，免得它们被当成"未匹配"扣分（见 2.3 代价函数）；留空则不限制 |
+
+用哪种特征仍由 Auto-Fit 区的 **Match mode** 决定（仅波谷只看 Valley 框，仅波峰只看
+Peak 框，两者都用则两个框都读）。手输完直接按 **▲ Auto-Fit** / **🔍 Fine Search**，
+不需要先上传文件、也不用按 Detect。
+
+手输的波长会画成中间 Exp 图上的竖线，并进右边对比表；拟合弹窗给出最佳厚度 + RMSE
+——**RMSE 大或配不上，往往说明你测的几个位置有问题**（材料/衬底选错、读数偏差等）。
+
+> Manual 模式下仍需在顶部先选一个**生成谱数据集**（那是被拟合的库），双材料数据集
+> 同样不支持拟合。
 
 ### 2.3 ▲ Auto-Fit Thickness — 厚度粗扫
 
@@ -271,6 +308,23 @@ scipy `find_peaks` 的参数。Gen 和 Exp 两边独立。
 3. 这时 Detect 会用平滑后的曲线找波谷
 4. 继续走流程 A 的步骤 4 起
 
+### 流程 D：只知道几个波谷位置，手输反推厚度
+
+1. 顶部下拉选材料数据集（如 `MoS2`）
+2. Experimental Spectra 区 `Source:` 切到 **Manual input**
+3. 在 `Valley λ (nm)` 填你测到的波谷波长，如 `450, 600, 780`（波峰填 `Peak λ`）
+4. Auto-Fit 区 `Match mode` 选对应的 Valleys / Peaks / Both
+5. 只测了某波段（如可见光）就在 `Measured range` 填 `400` / `900`，免得范围外的
+   生成谱特征被当未匹配扣分
+6. 按 ▲ Auto-Fit → 弹窗给最佳厚度 + RMSE；RMSE 大说明这几个位置可能有问题
+7. （可选）🔍 Fine Search 精搜
+
+### 流程 E：导入的数据幅度没归一化
+
+1. Upload file 模式加载数据（曲线幅度不在 0–1）
+2. 点 `⊡ Normalize (min-max)` → 每条谱拉到 [0, 1]
+3. 正常走流程 A；想还原原始幅度再点一下按钮即可
+
 ---
 
 ## 8. 排错
@@ -279,8 +333,9 @@ scipy `find_peaks` 的参数。Gen 和 Exp 两边独立。
 |---|---|
 | 状态栏一直 `Connecting to server...` | 等 30s（Render 冷启动）；超过 1 分钟刷新页面 |
 | 选数据集后 `Failed to load dataset` | 网络问题或后端 OOM，等几分钟重试 |
-| Auto-Fit 报 `select a dataset first` | 还没选数据集 |
-| Auto-Fit 报 `select an experiment file first` | 还没拖实验文件 |
+| Auto-Fit 报 `select a dataset first` | 还没选生成谱数据集 |
+| Auto-Fit 报 `no experimental valleys/peaks (detect from file or enter manually)` | Upload 模式还没检出特征（调检测参数或先 Detect）；Manual 模式对应的 λ 框是空的 |
+| Auto-Fit 报 `measured range λmin must be < λmax` | Manual 模式测量范围填反了 |
 | 弹窗 RMSE 曲线很平没有明显谷 | 实验波谷太少 / 不够准，调检测参数或换实验数据 |
 | 表里 Δ 全是红色 | 检测参数错配或材料选错；先用 Overlay View 目测两条谱 |
 | `429 Too Many Requests` | 触发限流；一分钟内 Auto-Fit / Fine Search 别按超过 15 次 |
