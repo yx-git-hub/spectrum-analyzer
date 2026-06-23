@@ -480,18 +480,33 @@
   <!-- Excel / CSV Experiment -->
   <div class="load-section">
     <div class="load-label">Experimental Spectra (Excel / CSV)</div>
-    <div id="excel-drop"
-         onclick="document.getElementById('excel-file-input').click()"
-         ondragover="onDragOver(event)" ondragleave="onDragLeave(event)"
-         ondrop="onExcelDrop(event)">
-      <div style="font-size:18px;line-height:1;">&#8659;</div>
-      <div>Drop file here or click to browse</div>
-      <div style="font-size:10px;margin-top:3px;opacity:0.7;">.xlsx  .xls  .csv</div>
+    <div class="ectl-row" style="margin-bottom:4px;">
+      <label>Source:</label>
+      <label style="font-weight:normal;"><input type="radio" name="exp-source" value="file" checked
+             onchange="setExpSource('file')"> Upload file</label>
+      <label style="font-weight:normal;"><input type="radio" name="exp-source" value="manual"
+             onchange="setExpSource('manual')"> Manual input</label>
     </div>
-    <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv"
-           style="display:none" onchange="onExcelFileSelected(event)">
-    <div id="excel-info" class="load-info">No file loaded</div>
-    <div id="excel-controls">
+
+    <!-- Upload-file sub-block -->
+    <div id="exp-file-block">
+      <div id="excel-drop"
+           onclick="document.getElementById('excel-file-input').click()"
+           ondragover="onDragOver(event)" ondragleave="onDragLeave(event)"
+           ondrop="onExcelDrop(event)">
+        <div style="font-size:18px;line-height:1;">&#8659;</div>
+        <div>Drop file here or click to browse</div>
+        <div style="font-size:10px;margin-top:3px;opacity:0.7;">.xlsx  .xls  .csv</div>
+      </div>
+      <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv"
+             style="display:none" onchange="onExcelFileSelected(event)">
+      <div id="excel-info" class="load-info">No file loaded</div>
+      <button id="normalize-btn" onclick="toggleNormalize()"
+              style="width:100%;margin-top:4px;padding:3px 6px;font-size:11px;cursor:pointer;
+                     background:#f3f4f6;border:1px solid #cbd5e1;border-radius:3px;color:#334155;">
+        &#9707; Normalize (min-max)
+      </button>
+      <div id="excel-controls">
       <div class="ectl-row" id="excel-sheet-row" style="display:none">
         <label>Sheet:</label>
         <select id="excel-sheet-select" onchange="onExcelSheetChange()"></select>
@@ -512,6 +527,31 @@
         <button id="excel-idx-next" onclick="stepExcelIdx(1)"
                 style="padding:2px 6px;min-width:22px;height:22px;font-size:11px;line-height:1;" disabled>▶</button>
         <span id="excel-idx-hint" class="ectl-hint"></span>
+      </div>
+      </div>
+    </div>
+
+    <!-- Manual feature-entry sub-block -->
+    <div id="exp-manual-block" style="display:none;">
+      <div class="ectl-row">
+        <label>Valley &#955; (nm):</label>
+        <input type="text" id="manual-valleys" placeholder="e.g. 450, 600, 780"
+               style="flex:1;min-width:0;" oninput="updatePlots()">
+      </div>
+      <div class="ectl-row">
+        <label>Peak &#955; (nm):</label>
+        <input type="text" id="manual-peaks" placeholder="e.g. 520, 690"
+               style="flex:1;min-width:0;" oninput="updatePlots()">
+      </div>
+      <div class="ectl-row">
+        <label>Measured range (nm):</label>
+        <input type="number" class="ectl-num" id="manual-range-min" placeholder="λmin" step="1"
+               title="Optional — excludes gen features below this from the fit">
+        <input type="number" class="ectl-num" id="manual-range-max" placeholder="λmax" step="1"
+               title="Optional — excludes gen features above this from the fit">
+      </div>
+      <div class="ectl-hint" style="margin-top:2px;">
+        Type known feature positions, pick Match mode, then Auto-Fit.
       </div>
     </div>
   </div>
@@ -890,6 +930,8 @@ const AppState = {
     thicknesses: [],    // may contain nulls
     names: [],          // Format A only: sample name per spectrum (from header row)
     selectedIdx: 0,
+    normalized: false,  // min-max normalize toggle state
+    _rawSpectra: null,  // backup of original spectra while normalized
   },
   valleys: {
     gen: [],   // number[] — detected valley wavelengths in gen spectrum
@@ -915,6 +957,7 @@ const AppState = {
     exp: { prominence: 0.2, distanceNm: 20, height: 0, detectValleys: true,  detectPeaks: false },
   },
   autoRun: false,
+  expSource: 'file',   // 'file' = uploaded spectrum; 'manual' = typed-in features
 };
 
 // Last coarse Auto-Fit result — used as background overlay when Fine Search runs
@@ -1506,6 +1549,118 @@ function parseExcelByFormat() {
     AppState.excel.thicknesses = [];
     AppState.excel.names = names;
   }
+
+  // Fresh data → drop any normalization state and reset the toggle.
+  AppState.excel.normalized = false;
+  AppState.excel._rawSpectra = null;
+  setNormalizeBtnLabel();
+}
+
+// Parse a free-text list of wavelengths ("450, 600 780") into a sorted,
+// de-duplicated number[]. Used by the manual feature-entry mode.
+function parseFeatureList(str) {
+  if (!str) return [];
+  const seen = new Set();
+  const out = [];
+  for (const tok of String(str).split(/[\s,;]+/)) {
+    if (!tok) continue;
+    const v = parseFloat(tok);
+    if (Number.isFinite(v) && !seen.has(v)) { seen.add(v); out.push(v); }
+  }
+  out.sort((a, b) => a - b);
+  return out;
+}
+
+// Switch between uploaded-file and manual feature-entry experiment sources.
+function setExpSource(src) {
+  AppState.expSource = (src === 'manual') ? 'manual' : 'file';
+  const manual = AppState.expSource === 'manual';
+  document.getElementById('exp-file-block').style.display   = manual ? 'none' : '';
+  document.getElementById('exp-manual-block').style.display = manual ? '' : 'none';
+  updatePlots();
+}
+
+// Toggle per-spectrum min-max normalization of the loaded experiment data.
+// Affine transform → valley/peak positions unchanged; affects prominence
+// filtering and overlay visuals. Click again to restore the originals.
+async function toggleNormalize() {
+  const ex = AppState.excel;
+  if (!ex.spectra.length) { setStatus('Normalize: load an experiment file first'); return; }
+
+  if (ex.normalized) {
+    if (ex._rawSpectra) ex.spectra = ex._rawSpectra;
+    ex._rawSpectra = null;
+    ex.normalized = false;
+  } else {
+    ex._rawSpectra = ex.spectra;
+    ex.spectra = ex.spectra.map(row => {
+      let lo = Infinity, hi = -Infinity;
+      for (const v of row) { if (v < lo) lo = v; if (v > hi) hi = v; }
+      const denom = hi - lo;
+      return denom > 0 ? row.map(v => (v - lo) / denom) : row.map(() => 0);
+    });
+    ex.normalized = true;
+  }
+  setNormalizeBtnLabel();
+
+  // Underlying data changed → re-apply smoothing if it was active, re-run exp
+  // detection if features were already present, then redraw. autoReSmooth
+  // recomputes on the new data (and no-ops when no smoothing is applied).
+  await autoReSmooth('exp');
+  if (AppState.valleys.exp.length || AppState.peaks.exp.length) {
+    await runDetection('exp');
+  }
+  updatePlots();
+  setStatus(ex.normalized ? 'Experiment data normalized (min-max)' : 'Experiment data restored to original');
+}
+
+function setNormalizeBtnLabel() {
+  const btn = document.getElementById('normalize-btn');
+  if (!btn) return;
+  if (AppState.excel.normalized) {
+    btn.innerHTML = '&#9707; Normalized &#10003; (click to revert)';
+    btn.style.background = '#dcfce7';
+    btn.style.borderColor = '#86efac';
+    btn.style.color = '#166534';
+  } else {
+    btn.innerHTML = '&#9707; Normalize (min-max)';
+    btn.style.background = '#f3f4f6';
+    btn.style.borderColor = '#cbd5e1';
+    btn.style.color = '#334155';
+  }
+}
+
+// Resolve exp features + effective gaps for a fit, honoring the experiment
+// source. file mode optionally re-detects from the uploaded spectrum; manual
+// mode reads the typed-in feature lists and applies the measured-range mask.
+// Returns { ok, expValleys, expPeaks, gaps } (ok=false after setting status).
+async function resolveFitFeatures(mode, label, redetect) {
+  if (AppState.expSource === 'manual') {
+    const expValleys = parseFeatureList(document.getElementById('manual-valleys').value);
+    const expPeaks   = parseFeatureList(document.getElementById('manual-peaks').value);
+    const measMin = parseFloat(document.getElementById('manual-range-min').value);
+    const measMax = parseFloat(document.getElementById('manual-range-max').value);
+    if (Number.isFinite(measMin) && Number.isFinite(measMax) && measMin >= measMax) {
+      setStatus(`${label}: measured range λmin must be < λmax`);
+      return { ok: false };
+    }
+    // Publish so the comparison table, exp chart and result modal show them.
+    AppState.valleys.exp = expValleys;
+    AppState.peaks.exp   = expPeaks;
+    // Append window-exclusion gaps (request-only; not stored, not drawn).
+    const gaps = [...AppState.gapMask.intervals];
+    if (Number.isFinite(measMin)) gaps.push({ wlMin: -1e9, wlMax: measMin - 1e-6 });
+    if (Number.isFinite(measMax)) gaps.push({ wlMin: measMax + 1e-6, wlMax: 1e9 });
+    return { ok: true, expValleys, expPeaks, gaps };
+  }
+
+  if (redetect) await runDetection('exp');
+  return {
+    ok: true,
+    expValleys: AppState.valleys.exp,
+    expPeaks:   AppState.peaks.exp,
+    gaps: AppState.gapMask.intervals,
+  };
 }
 
 function onExcelFormatChange() {
@@ -1658,6 +1813,7 @@ function updateGenChart() {
 }
 
 function updateExpChart() {
+  if (AppState.expSource === 'manual') { renderManualExpChart(); return; }
   const { wavelengths, spectra, thicknesses, selectedIdx } = AppState.excel;
   const range = getWlRange();
 
@@ -1708,6 +1864,43 @@ function updateExpChart() {
     `Experimental Spectrum${titleSuffix}${valleyLabelSuffix(eV, eP)}`,
     range, shapes, annots
   );
+  Plotly.react('exp-chart', traces, layout, plotConfig());
+}
+
+// Manual-input mode: no spectrum, so draw the typed-in valley/peak
+// wavelengths as vertical lines on an empty [0,1] reflectance axis.
+function renderManualExpChart() {
+  const eV = AppState.valleys.exp, eP = AppState.peaks.exp;
+  if (!eV.length && !eP.length) {
+    Plotly.react('exp-chart', [],
+      emptyLayout('Experimental Spectrum', 'Manual mode — enter feature wavelengths'));
+    return;
+  }
+  let range = getWlRange();
+  if (range.min == null && range.max == null) {
+    const all = [...eV, ...eP];
+    const lo = Math.min(...all), hi = Math.max(...all);
+    const pad = Math.max(10, (hi - lo) * 0.1);
+    range = { min: lo - pad, max: hi + pad };
+  }
+  const shapes = [
+    ...buildValleyShapes(eV, '#8B0000', 'dash'),
+    ...buildValleyShapes(eP, '#2ca02c', 'dot'),
+  ];
+  const annots = [
+    ...buildValleyAnnotations(eV, '#8B0000'),
+    ...buildValleyAnnotations(eP, '#2ca02c'),
+  ];
+  const traces = [];
+  if (eV.length) traces.push({ x:[null], y:[null], type:'scatter', mode:'lines',
+    name:'— Valley', line:{color:'#8B0000', width:1.5, dash:'dash'}, showlegend:true });
+  if (eP.length) traces.push({ x:[null], y:[null], type:'scatter', mode:'lines',
+    name:'··· Peak', line:{color:'#2ca02c', width:1.5, dash:'dot'}, showlegend:true });
+  const layout = spectrumLayout(
+    `Manual features — ${eV.length} valleys, ${eP.length} peaks`,
+    range, shapes, annots
+  );
+  layout.yaxis.range = [0, 1];
   Plotly.react('exp-chart', traces, layout, plotConfig());
 }
 
@@ -2412,24 +2605,22 @@ async function autoFitThickness() {
 
   if (!datasetId) { setStatus('Auto-fit: select a dataset first'); return; }
 
-  // Auto-detect exp features before fitting (still client-driven)
-  setStatus('Auto-detecting features before fitting…');
-  await runDetection('exp');
-
-  const expValleys = AppState.valleys.exp;
-  const expPeaks   = AppState.peaks.exp;
+  // Resolve exp features by source (file: re-detect; manual: typed-in lists).
+  if (AppState.expSource === 'file') setStatus('Auto-detecting features before fitting…');
+  const feat = await resolveFitFeatures(mode, 'Auto-fit', true);
+  if (!feat.ok) return;
+  const { expValleys, expPeaks, gaps } = feat;
 
   if ((mode === 'valleys' || mode === 'both') && !expValleys.length) {
-    setStatus('Auto-fit: no experimental valleys detected — adjust detection params'); return;
+    setStatus('Auto-fit: no experimental valleys (detect from file or enter manually)'); return;
   }
   if ((mode === 'peaks' || mode === 'both') && !expPeaks.length) {
-    setStatus('Auto-fit: no experimental peaks detected — adjust detection params'); return;
+    setStatus('Auto-fit: no experimental peaks (detect from file or enter manually)'); return;
   }
 
   const p             = AppState.detection.gen;
   const penaltyVal    = parseFloat(document.getElementById('autofit-penalty').value)  || 100;
   const rmseThreshold = parseFloat(document.getElementById('autofit-max-diff').value) || 30;
-  const gaps          = AppState.gapMask.intervals;
 
   showLoading(`Auto-fitting on server… ${thicknesses.length} spectra`);
 
@@ -2757,16 +2948,20 @@ async function runFineSearch() {
   const { datasetId } = AppState.csv;
   if (!datasetId) { setStatus('Fine search: select a dataset first'); return; }
 
-  const expValleys = AppState.valleys.exp;
-  const expPeaks   = AppState.peaks.exp;
   const modeEl     = document.querySelector('input[name="autofit-mode"]:checked');
   const mode       = modeEl ? modeEl.value : 'valleys';
 
+  // file mode reuses already-detected features (no re-detect); manual mode
+  // reads the typed-in lists and applies the measured-range mask.
+  const feat = await resolveFitFeatures(mode, 'Fine search', false);
+  if (!feat.ok) return;
+  const { expValleys, expPeaks, gaps } = feat;
+
   if ((mode === 'valleys' || mode === 'both') && !expValleys.length) {
-    setStatus('Fine search: please detect experimental valleys first'); return;
+    setStatus('Fine search: no experimental valleys (run Auto-Fit/Detect or enter manually)'); return;
   }
   if ((mode === 'peaks' || mode === 'both') && !expPeaks.length) {
-    setStatus('Fine search: please detect peaks in experimental spectrum first'); return;
+    setStatus('Fine search: no experimental peaks (run Auto-Fit/Detect or enter manually)'); return;
   }
 
   const s  = parseFloat(document.getElementById('fs-start').value);
@@ -2782,7 +2977,6 @@ async function runFineSearch() {
   const p             = AppState.detection.gen;
   const penaltyVal    = parseFloat(document.getElementById('autofit-penalty').value)  || 100;
   const rmseThreshold = parseFloat(document.getElementById('autofit-max-diff').value) || 30;
-  const gaps          = AppState.gapMask.intervals;
 
   showLoading(`Fine search on server… scanning ${n} thickness points`);
 
